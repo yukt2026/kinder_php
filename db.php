@@ -315,14 +315,87 @@ if (session_status() == PHP_SESSION_NONE) {
     function isSettled($pdo, $bapariId, $userId, $date) {
         $stmt = $pdo->prepare("SELECT MAX(settlement_date) as last_settle FROM ledger_settlements WHERE bapari_id = ? AND user_id = ?");
         $stmt->execute([$bapariId, $userId]);
-        $lastSettle = $stmt->fetch()['last_settle'];
-        return ($lastSettle && $date <= $lastSettle);
+        $row = $stmt->fetch();
+        $lastSettle = $row ? $row['last_settle'] : null;
+        return ($lastSettle && $date < $lastSettle);
     }
     
     function isKarigorSettled($pdo, $karigorId, $userId, $date) {
         $stmt = $pdo->prepare("SELECT MAX(settlement_date) as last_settle FROM karigor_ledger_settlements WHERE karigor_id = ? AND user_id = ?");
         $stmt->execute([$karigorId, $userId]);
-        $lastSettle = $stmt->fetch()['last_settle'];
-        return ($lastSettle && $date <= $lastSettle);
+        $row = $stmt->fetch();
+        $lastSettle = $row ? $row['last_settle'] : null;
+        return ($lastSettle && $date < $lastSettle);
     }
-    ?>
+    
+    // Duplicate Entry Detection Helpers
+    function findDuplicateDeposit($pdo, $userId, $bapariId, $date, $fineWeight, $jamaFine, $cashReceived, $excludeId = 0) {
+        $sql = "SELECT id, date, fine_weight, jama_fine, cash_received, created_at 
+                FROM fine_deposits 
+                WHERE user_id = ? AND bapari_id = ? AND date = ? 
+                  AND ABS(fine_weight - ?) < 0.001 
+                  AND ABS(jama_fine - ?) < 0.001 
+                  AND ABS(cash_received - ?) < 0.01";
+        $params = [$userId, $bapariId, $date, $fineWeight, $jamaFine, $cashReceived];
+        if ($excludeId > 0) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
+        $sql .= " ORDER BY id DESC LIMIT 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetch();
+    }
+
+    function findDuplicateKaj($pdo, $userId, $bapariId, $date, $totalKajFine, $cashBill, $excludeId = 0) {
+        $sql = "SELECT id, date, total_kaj_fine, cash_bill, created_at 
+                FROM kaj_entries 
+                WHERE user_id = ? AND bapari_id = ? AND date = ? 
+                  AND ABS(total_kaj_fine - ?) < 0.001 
+                  AND ABS(cash_bill - ?) < 0.01";
+        $params = [$userId, $bapariId, $date, $totalKajFine, $cashBill];
+        if ($excludeId > 0) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
+        $sql .= " ORDER BY id DESC LIMIT 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetch();
+    }
+
+    function findDuplicateKarigorIssue($pdo, $userId, $karigorId, $date, $fineWeight, $issueFine, $cashPaid, $excludeId = 0) {
+        $sql = "SELECT id, date, fine_weight, issue_fine, cash_paid, created_at 
+                FROM karigor_material_issues 
+                WHERE user_id = ? AND karigor_id = ? AND date = ? 
+                  AND ABS(fine_weight - ?) < 0.001 
+                  AND ABS(issue_fine - ?) < 0.001 
+                  AND ABS(cash_paid - ?) < 0.01";
+        $params = [$userId, $karigorId, $date, $fineWeight, $issueFine, $cashPaid];
+        if ($excludeId > 0) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
+        $sql .= " ORDER BY id DESC LIMIT 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetch();
+    }
+
+    function findDuplicateKarigorReceive($pdo, $userId, $karigorId, $date, $totalReceiveFine, $cashPaid, $excludeId = 0) {
+        $sql = "SELECT id, date, total_receive_fine, cash_paid, created_at 
+                FROM karigor_kaj_receives 
+                WHERE user_id = ? AND karigor_id = ? AND date = ? 
+                  AND ABS(total_receive_fine - ?) < 0.001 
+                  AND ABS(cash_paid - ?) < 0.01";
+        $params = [$userId, $karigorId, $date, $totalReceiveFine, $cashPaid];
+        if ($excludeId > 0) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
+        $sql .= " ORDER BY id DESC LIMIT 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetch();
+    }
+?>

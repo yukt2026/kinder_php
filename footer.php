@@ -128,6 +128,36 @@
                 }
             }
         });
+
+        // Global Double-Submission Prevention Strategy
+        document.addEventListener('submit', function(e) {
+            const form = e.target;
+            if (form && form.method && form.method.toUpperCase() === 'POST') {
+                if (form.getAttribute('data-submitting') === 'true') {
+                    e.preventDefault();
+                    return false;
+                }
+                form.setAttribute('data-submitting', 'true');
+                
+                const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+                if (submitBtn && !submitBtn.hasAttribute('data-no-disable')) {
+                    const origHtml = submitBtn.innerHTML;
+                    // Asynchronously disable so button name/value submits properly on mobile & webview
+                    setTimeout(() => {
+                        submitBtn.disabled = true;
+                        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+                        submitBtn.innerHTML = '<span class="inline-block animate-spin mr-1.5">⏳</span> Saving...';
+                    }, 20);
+                    
+                    setTimeout(() => {
+                        form.removeAttribute('data-submitting');
+                        submitBtn.disabled = false;
+                        submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+                        submitBtn.innerHTML = origHtml;
+                    }, 8000);
+                }
+            }
+        }, true);
     </script>
 </body>
 </html>

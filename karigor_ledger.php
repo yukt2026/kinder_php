@@ -5,6 +5,7 @@ $karigorId = intval($_GET['karigor_id'] ?? 0);
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $isPrintMode = isset($_GET['print']) && $_GET['print'] == 1;
+$filterType = $_GET['filter_type'] ?? 'all';
 
 if ($karigorId <= 0) {
     echo "Invalid Karigor ID";
@@ -108,7 +109,7 @@ $latestSettle = $stmt->fetch();
 $openingGold = 0.0;
 $openingCash = 0.0;
 
-if (!empty($from)) {
+if (!empty($from) && $filterType === 'all') {
     $settleStmt = $pdo->prepare("SELECT * FROM karigor_ledger_settlements WHERE karigor_id = ? AND user_id = ? AND settlement_date < ? ORDER BY settlement_date DESC LIMIT 1");
     $settleStmt->execute([$karigorId, $userId, $from]);
     $prevSettle = $settleStmt->fetch();
@@ -123,8 +124,10 @@ if (!empty($from)) {
     $issueParamsBefore = [$userId, $karigorId, $from];
     $issueQueryBefore = "SELECT SUM(issue_fine) as g, SUM(cash_paid) as c FROM karigor_material_issues WHERE user_id = ? AND karigor_id = ? AND date < ?";
     if (!empty($startCalculationFromDate)) {
-        $issueQueryBefore .= " AND date > ?";
+        $issueQueryBefore .= " AND (date > ? OR (date = ? AND created_at > ?))";
         $issueParamsBefore[] = $startCalculationFromDate;
+        $issueParamsBefore[] = $startCalculationFromDate;
+        $issueParamsBefore[] = $prevSettle['created_at'];
     }
     $stmt = $pdo->prepare($issueQueryBefore);
     $stmt->execute($issueParamsBefore);
@@ -133,8 +136,10 @@ if (!empty($from)) {
     $recParamsBefore = [$userId, $karigorId, $from];
     $recQueryBefore = "SELECT SUM(total_receive_fine) as g, SUM(cash_paid) as c FROM karigor_kaj_receives WHERE user_id = ? AND karigor_id = ? AND date < ?";
     if (!empty($startCalculationFromDate)) {
-        $recQueryBefore .= " AND date > ?";
+        $recQueryBefore .= " AND (date > ? OR (date = ? AND created_at > ?))";
         $recParamsBefore[] = $startCalculationFromDate;
+        $recParamsBefore[] = $startCalculationFromDate;
+        $recParamsBefore[] = $prevSettle['created_at'];
     }
     $stmt = $pdo->prepare($recQueryBefore);
     $stmt->execute($recParamsBefore);
@@ -147,7 +152,7 @@ if (!empty($from)) {
 // 5. Fetch Material Issues within Date Range
 $issueQuery = "SELECT id, date, 'issue' as type, fine_weight, purity, issue_fine, cash_paid, remark, created_at FROM karigor_material_issues WHERE user_id = ? AND karigor_id = ?";
 $issueParams = [$userId, $karigorId];
-if (!empty($from)) { $issueQuery .= " AND date >= ?"; $issueParams[] = $from; }
+if (!empty($from) && $filterType === 'all') { $issueQuery .= " AND date >= ?"; $issueParams[] = $from; }
 if (!empty($to)) { $issueQuery .= " AND date <= ?"; $issueParams[] = $to; }
 $stmt = $pdo->prepare($issueQuery);
 $stmt->execute($issueParams);
@@ -156,7 +161,7 @@ $issues = $stmt->fetchAll();
 // 6. Fetch Kaj Receives within Date Range
 $recQuery = "SELECT id, date, 'receive' as type, total_receive_fine, total_profit_less, cash_paid, remark, created_at FROM karigor_kaj_receives WHERE user_id = ? AND karigor_id = ?";
 $recParams = [$userId, $karigorId];
-if (!empty($from)) { $recQuery .= " AND date >= ?"; $recParams[] = $from; }
+if (!empty($from) && $filterType === 'all') { $recQuery .= " AND date >= ?"; $recParams[] = $from; }
 if (!empty($to)) { $recQuery .= " AND date <= ?"; $recParams[] = $to; }
 $stmt = $pdo->prepare($recQuery);
 $stmt->execute($recParams);
@@ -165,7 +170,7 @@ $receives = $stmt->fetchAll();
 // 6b. Fetch Settlements within Date Range
 $settleQuery = "SELECT id, settlement_date as date, 'settlement' as type, closing_gold, closing_cash, created_at FROM karigor_ledger_settlements WHERE user_id = ? AND karigor_id = ?";
 $settleParams = [$userId, $karigorId];
-if (!empty($from)) { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
+if (!empty($from) && $filterType === 'all') { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
 if (!empty($to)) { $settleQuery .= " AND settlement_date <= ?"; $settleParams[] = $to; }
 $stmt = $pdo->prepare($settleQuery);
 $stmt->execute($settleParams);
@@ -196,7 +201,7 @@ $ledgerRows = [];
 $calcFineTracker = $openingGold;
 $calcCashTracker = $openingCash;
 
-if (!empty($from) || $openingGold != 0 || $openingCash != 0) {
+if ($filterType === 'all' && (!empty($from) || $openingGold != 0 || $openingCash != 0)) {
     $ledgerRows[] = [
         'date' => $from ?: (!empty($entries) ? $entries[0]['date'] : date('Y-m-d')),
         'no' => '',
@@ -410,18 +415,125 @@ $stmt->execute([$karigorId, $userId]);
 $settlementsHistory = $stmt->fetchAll();
 
 if ($isPrintMode) {
-    // Print View
+    // Print & Photo View
     ?>
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Karigor Statement - <?= htmlspecialchars($karigor['name']) ?></title>
         <style>
-            body { font-family: 'Times New Roman', Times, serif; font-size: 11px; color: #000; margin: 20px; background: #fff; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #777; padding: 5px 6px; text-align: left; vertical-align: top; }
-            th { background: #e2e8f0; font-weight: bold; text-align: center; }
+            * { box-sizing: border-box; }
+            body {
+                font-family: 'Times New Roman', Times, serif;
+                font-size: 11px;
+                color: #000000;
+                margin: 0;
+                padding: 0;
+                background-color: #f1f5f9;
+            }
+            .action-toolbar {
+                position: sticky;
+                top: 0;
+                z-index: 9999;
+                background: #0f172a;
+                padding: 10px 14px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            }
+            .toolbar-inner {
+                max-width: 900px;
+                margin: 0 auto;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }
+            .toolbar-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                padding: 8px 14px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 700;
+                cursor: pointer;
+                text-decoration: none;
+                border: none;
+                transition: all 0.15s ease;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .toolbar-btn:active {
+                transform: scale(0.96);
+            }
+            .btn-photo {
+                background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+                color: #ffffff;
+                box-shadow: 0 2px 10px rgba(5,150,105,0.4);
+            }
+            .btn-photo:hover { background: #047857; }
+            .btn-dl {
+                background: #2563eb;
+                color: #ffffff;
+            }
+            .btn-dl:hover { background: #1d4ed8; }
+            .btn-pdf {
+                background: #d97706;
+                color: #ffffff;
+            }
+            .btn-pdf:hover { background: #b45309; }
+            .btn-back {
+                background: rgba(255,255,255,0.12);
+                color: #f8fafc;
+            }
+            .btn-back:hover { background: rgba(255,255,255,0.22); }
+            .status-msg {
+                max-width: 900px;
+                margin: 4px auto 0 auto;
+                color: #34d399;
+                font-size: 11px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                text-align: right;
+                min-height: 16px;
+            }
+
+            .scroll-wrapper {
+                width: 100%;
+                overflow-x: auto;
+                padding: 16px 8px;
+                -webkit-overflow-scrolling: touch;
+            }
+            .paper-sheet {
+                width: 860px;
+                margin: 0 auto;
+                background: #ffffff;
+                padding: 22px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+                border-radius: 4px;
+            }
+
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }
+            th, td {
+                border: 1px solid #777777;
+                padding: 5px 6px;
+                text-align: left;
+                vertical-align: top;
+            }
+            th {
+                background-color: #e2e8f0;
+                font-weight: bold;
+                text-align: center;
+            }
             .text-center { text-align: center; }
             .text-right { text-align: right; }
             .font-mono { font-family: monospace; }
@@ -432,135 +544,387 @@ if ($isPrintMode) {
                 font-size: 9.5px;
                 color: #555555;
             }
+
+                        @media (max-width: 640px) {
+                .action-toolbar {
+                    padding: 8px 10px;
+                }
+                .toolbar-inner {
+                    flex-direction: column;
+                    align-items: stretch;
+                    gap: 8px;
+                }
+                .toolbar-inner > div {
+                    width: 100%;
+                    justify-content: space-between;
+                }
+                .toolbar-btn {
+                    flex: 1;
+                    padding: 8px 6px;
+                    font-size: 11px;
+                }
+            }
+            @media print {
+                .no-print {
+                    display: none !important;
+                }
+                body {
+                    background: #ffffff !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                .scroll-wrapper {
+                    padding: 0 !important;
+                    overflow: visible !important;
+                }
+                .paper-sheet {
+                    width: 100% !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    box-shadow: none !important;
+                    border-radius: 0 !important;
+                }
+                @page {
+                    size: auto;
+                    margin: 10mm;
+                }
+            }
         </style>
+        <script src="assets/js/html2canvas.min.js"></script>
+        <script>
+            if (typeof html2canvas === 'undefined') {
+                document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>');
+            }
+        </script>
     </head>
-    <body onload="window.print()">
-        <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px;">
-            <div>
-                <div style="font-size: 16px; font-weight: bold; text-transform: uppercase;"><?= htmlspecialchars($currentUser['company_name'] ?: 'Dasgold') ?></div>
-                <div style="font-size: 10px; color: #555;">KARIGOR STATEMENT FOR: <strong><?= htmlspecialchars($karigor['name']) ?></strong></div>
+    <body>
+        <!-- Top Action Toolbar (Hidden during print) -->
+        <div class="action-toolbar no-print">
+            <div class="toolbar-inner">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= $from ?>&to=<?= $to ?>&filter_type=<?= $filterType ?>" class="toolbar-btn btn-back">
+                        ← Back to Ledger
+                    </a>
+                    <span style="color: #94a3b8; font-size: 12px;">
+                        Karigor: <strong style="color: #fff;"><?= htmlspecialchars($karigor['name']) ?></strong>
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <!-- Send as Photo (WhatsApp / Share Sheet) -->
+                    <button type="button" id="btnSharePhoto" onclick="generateAndSharePhoto(false)" class="toolbar-btn btn-photo">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                        Send as Photo
+                    </button>
+                    <!-- Download Photo -->
+                    <button type="button" id="btnDlPhoto" onclick="generateAndSharePhoto(true)" class="toolbar-btn btn-dl">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download Photo
+                    </button>
+                    <!-- Save as PDF -->
+                    <button type="button" onclick="window.print()" class="toolbar-btn btn-pdf">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        Save as PDF
+                    </button>
+                </div>
             </div>
-            <div style="text-align: right; font-size: 10px;">
-                Period: <strong><?= $from ? date('d/m/Y', strtotime($from)) : 'Start' ?></strong> to <strong><?= $to ? date('d/m/Y', strtotime($to)) : 'Today' ?></strong>
+            <div id="photoStatus" class="status-msg"></div>
+        </div>
+
+        <div class="scroll-wrapper">
+            <div id="statementContent" class="paper-sheet">
+                <!-- Company Header Block for Printed Statements -->
+                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <?php if (!empty($currentUser['company_logo'])): ?>
+                            <img src="<?= htmlspecialchars($currentUser['company_logo']) ?>" style="max-height: 55px; max-width: 120px; object-fit: contain;">
+                        <?php endif; ?>
+                        <div>
+                            <div style="font-size: 16px; font-weight: bold; text-transform: uppercase;"><?= htmlspecialchars($currentUser['company_name'] ?: 'Dasgold') ?></div>
+                            <div style="font-size: 10px; color: #555; margin-top: 2px;">
+                                <?= htmlspecialchars($currentUser['company_address'] ?: '') ?>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="text-align: right; font-size: 10px; color: #333; line-height: 1.4;">
+                        <?php if (!empty($currentUser['company_mobile'])): ?>
+                            <div><strong>Mobile:</strong> <?= htmlspecialchars($currentUser['company_mobile']) ?></div>
+                        <?php endif; ?>
+                        <?php if (!empty($currentUser['company_gst'])): ?>
+                            <div><strong>GSTIN:</strong> <?= htmlspecialchars($currentUser['company_gst']) ?></div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-size: 10px; color: #555; text-transform: uppercase; font-weight: bold;">Statement For Karigor:</div>
+                        <div style="font-size: 14px; font-weight: bold; color: #000;"><?= htmlspecialchars($karigor['name']) ?></div>
+                        <?php if ($karigor['mobile']): ?>
+                            <div style="font-size: 10px; color: #555; margin-top: 1px;">Mobile: <?= htmlspecialchars($karigor['mobile']) ?></div>
+                        <?php endif; ?>
+                    </div>
+                    <div style="text-align: right;">
+                        <?php
+$stmtTitle = 'KARIGOR STATEMENT';
+if ($filterType === 'metal') $stmtTitle = 'STATEMENT - ONLY METAL (MATERIAL ISSUE)';
+if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
+?>
+<div style="font-size: 12px; font-weight: bold;"><?= $stmtTitle ?></div>
+                        <?php if ($from || $to): ?>
+                            <div style="font-size: 10px; color: #555; margin-top: 1px;">
+                                Period: <strong><?= $from ? date('d/m/Y', strtotime($from)) : 'Start' ?></strong> to <strong><?= $to ? date('d/m/Y', strtotime($to)) : 'Today' ?></strong>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 75px;">Date</th>
+                            <th style="width: 85px;">Ref No</th>
+                            <th>Item / Particulars</th>
+                            <th style="width: 65px;">Gross<br><span style="font-size:9px; font-weight:normal;">Less</span></th>
+                            <th style="width: 65px;">Net</th>
+                            <th style="width: 55px;">Tch<br><span style="font-size:9px; font-weight:normal;">Wst</span></th>
+                            <th style="width: 80px;">Fine</th>
+                            <th style="width: 75px;">Cash</th>
+                            <th>Remark</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($ledgerRows as $r): ?>
+                            <tr>
+                                <td class="text-center"><?= date('d/m/Y', strtotime($r['date'])) ?></td>
+                                <td class="text-center"><?= htmlspecialchars($r['no']) ?></td>
+                                <?php 
+                                $p1 = floatval($r['net_part1'] ?? 0);
+                                $p2 = floatval($r['net_part2'] ?? 0);
+                                $ex = floatval($r['extra_pure'] ?? 0);
+                                $hasSplit = ($p1 > 0 || $p2 > 0);
+                                
+                                if ($hasSplit) {
+                                    $w1 = floatval($r['wastage1'] ?? 0);
+                                    $w2 = floatval($r['wastage2'] ?? 0);
+                                    $mel = floatval($r['tch'] ?? 0);
+                                    $wstDef = floatval($r['wst'] ?? 0);
+                                    
+                                    $eff1 = ($w1 > 50) ? $w1 : (($w1 > 0) ? ($mel + $w1) : ($mel + $wstDef));
+                                    $eff2 = ($w2 > 50) ? $w2 : (($w2 > 0) ? ($mel + $w2) : ($mel + $wstDef));
+                                }
+                                ?>
+                                <td>
+                                    <strong><?= htmlspecialchars($r['name']) ?></strong>
+                                </td>
+                                <td class="text-right font-mono">
+                                    <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
+                                        <?php if ($hasSplit): ?>
+                                            <span style="font-size: 9px; font-weight: bold;">P1: <?= number_format($p1, 3) ?></span><br>
+                                            <span class="stacked-val" style="font-weight: bold;">P2: <?= number_format($p2, 3) ?></span>
+                                        <?php else: ?>
+                                            <?= number_format(floatval($r['gross'] ?? 0), 3) ?><br>
+                                            <span class="stacked-val"><?= number_format(floatval($r['less'] ?? 0), 3) ?></span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-right font-mono">
+                                    <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
+                                        <?= $r['net'] > 0 ? number_format($r['net'], 3) : '' ?>
+                                        <?php if ($ex > 0): ?>
+                                            <br><span class="stacked-val" style="color: #b45309; font-weight: bold;">+<?= number_format($ex, 3) ?> Ex</span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-right font-mono">
+                                    <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
+                                        <?php if ($hasSplit): ?>
+                                            <span style="font-size: 9px; font-weight: bold; color: #b45309;"><?= number_format($eff1, 2) ?>%</span><br>
+                                            <span class="stacked-val" style="font-weight: bold; color: #b45309;"><?= number_format($eff2, 2) ?>%</span>
+                                        <?php else: ?>
+                                            <?= number_format(floatval($r['tch'] ?? 0), 2) ?>%<br>
+                                            <span class="stacked-val"><?= number_format(floatval($r['wst'] ?? 0), 2) ?>%</span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-right font-mono">
+                                    <?php 
+                                    if ($r['fine'] != 0) {
+                                        $isCr = $r['fine'] >= 0;
+                                        echo "<span class='" . ($isCr ? 'text-green' : 'text-red') . "'>" . number_format(abs($r['fine']), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                    } else echo '0.000';
+                                    ?>
+                                </td>
+                                <td class="text-right font-mono">
+                                    <?php 
+                                    if ($r['cash'] != 0) {
+                                        $isCr = $r['cash'] >= 0;
+                                        echo "<span class='" . ($isCr ? 'text-green' : 'text-red') . "'>" . number_format(abs($r['cash']), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                    } else echo '0';
+                                    ?>
+                                </td>
+                                <td style="font-size: 10px;"><?= htmlspecialchars($r['remark']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <tr style="font-weight: bold; background-color: #f8fafc;">
+                            <td colspan="3" class="text-center">Closing Balance:</td>
+                            <td class="text-right font-mono"><?= number_format($totGross, 3) ?></td>
+                            <td class="text-right font-mono"><?= number_format($totNet, 3) ?></td>
+                            <td></td>
+                            <td class="text-right font-mono">
+                                <?php 
+                                $isCr = $currentOutstandingGold >= 0;
+                                $colorClass = $isCr ? 'text-green' : 'text-red';
+                                echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingGold), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                ?>
+                            </td>
+                            <td class="text-right font-mono">
+                                <?php 
+                                $isCr = $currentOutstandingCash >= 0;
+                                $colorClass = $isCr ? 'text-green' : 'text-red';
+                                echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingCash), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                ?>
+                            </td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 75px;">Date</th>
-                    <th style="width: 85px;">Ref No</th>
-                    <th>Item / Particulars</th>
-                    <th style="width: 65px;">Gross<br><span style="font-size:9px; font-weight:normal;">Less</span></th>
-                    <th style="width: 65px;">Net</th>
-                    <th style="width: 55px;">Tch<br><span style="font-size:9px; font-weight:normal;">Wst</span></th>
-                    <th style="width: 80px;">Fine</th>
-                    <th style="width: 75px;">Cash</th>
-                    <th>Remark</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($ledgerRows as $r): ?>
-                    <tr>
-                        <td class="text-center"><?= date('d/m/Y', strtotime($r['date'])) ?></td>
-                        <td class="text-center"><?= htmlspecialchars($r['no']) ?></td>
-                        <?php 
-                        $p1 = floatval($r['net_part1'] ?? 0);
-                        $p2 = floatval($r['net_part2'] ?? 0);
-                        $ex = floatval($r['extra_pure'] ?? 0);
-                        $hasSplit = ($p1 > 0 || $p2 > 0);
-                        
-                        if ($hasSplit) {
-                            $w1 = floatval($r['wastage1'] ?? 0);
-                            $w2 = floatval($r['wastage2'] ?? 0);
-                            $mel = floatval($r['tch'] ?? 0);
-                            $wstDef = floatval($r['wst'] ?? 0);
-                            
-                            $eff1 = ($w1 > 50) ? $w1 : (($w1 > 0) ? ($mel + $w1) : ($mel + $wstDef));
-                            $eff2 = ($w2 > 50) ? $w2 : (($w2 > 0) ? ($mel + $w2) : ($mel + $wstDef));
+        <script>
+            let isPhotoBusy = false;
+            async function generateAndSharePhoto(isDownloadOnly) {
+                if (isPhotoBusy) return;
+                isPhotoBusy = true;
+                const btn = document.getElementById('btnSharePhoto');
+                const btnDl = document.getElementById('btnDlPhoto');
+                const status = document.getElementById('photoStatus');
+                const origBtnText = btn ? btn.innerHTML : '';
+                
+                if (btn && !isDownloadOnly) btn.innerHTML = '⏳ Generating...';
+                if (btnDl && isDownloadOnly) btnDl.innerHTML = '⏳ Generating...';
+                if (status) status.innerText = 'Creating high-resolution photo...';
+
+                try {
+                    const sheet = document.getElementById('statementContent');
+                    if (!sheet) throw new Error("Statement content not found");
+
+                    const scrollWrapper = sheet.closest('.scroll-wrapper');
+                    const prevScrollLeft = scrollWrapper ? scrollWrapper.scrollLeft : 0;
+                    if (scrollWrapper) scrollWrapper.scrollLeft = 0;
+
+                    await new Promise(r => setTimeout(r, 120));
+
+                    const canvas = await html2canvas(sheet, {
+                        scale: 2,
+                        backgroundColor: '#ffffff',
+                        useCORS: true,
+                        allowTaint: true,
+                        logging: false,
+                        scrollX: 0,
+                        scrollY: 0,
+                        windowWidth: 860
+                    });
+
+                    const safeName = <?= json_encode(preg_replace('/[^a-zA-Z0-9_-]/', '_', $karigor['name'] ?: 'karigor')) ?>;
+                    const dateStr = <?= json_encode(date('d_m_Y')) ?>;
+                    const fileName = `Karigor_Ledger_${safeName}_${dateStr}.png`;
+
+                    if (isDownloadOnly) {
+                        downloadFallback(canvas, fileName);
+                        if (status) status.innerText = '✓ Photo downloaded!';
+                        setTimeout(() => { if (status) status.innerText = ''; }, 3500);
+                        return;
+                    }
+
+                    canvas.toBlob(async function(blob) {
+                        if (!blob) {
+                            alert("Image creation failed. Downloading directly instead.");
+                            downloadFallback(canvas, fileName);
+                            return;
                         }
-                        ?>
-                        <td>
-                            <strong><?= htmlspecialchars($r['name']) ?></strong>
-                        </td>
-                        <td class="text-right font-mono">
-                            <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
-                                <?php if ($hasSplit): ?>
-                                    <span style="font-size: 9px; font-weight: bold;">P1: <?= number_format($p1, 3) ?></span><br>
-                                    <span class="stacked-val" style="font-weight: bold;">P2: <?= number_format($p2, 3) ?></span>
-                                <?php else: ?>
-                                    <?= number_format(floatval($r['gross'] ?? 0), 3) ?><br>
-                                    <span class="stacked-val"><?= number_format(floatval($r['less'] ?? 0), 3) ?></span>
-                                <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-right font-mono">
-                            <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
-                                <?= $r['net'] > 0 ? number_format($r['net'], 3) : '' ?>
-                                <?php if ($ex > 0): ?>
-                                    <br><span class="stacked-val" style="color: #b45309; font-weight: bold;">+<?= number_format($ex, 3) ?> Ex</span>
-                                <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-right font-mono">
-                            <?php if (!$r['is_opening'] && $r['name'] !== 'Cash Advance' && $r['name'] !== 'Cash Received'): ?>
-                                <?php if ($hasSplit): ?>
-                                    <span style="font-size: 9px; font-weight: bold; color: #b45309;"><?= number_format($eff1, 2) ?>%</span><br>
-                                    <span class="stacked-val" style="font-weight: bold; color: #b45309;"><?= number_format($eff2, 2) ?>%</span>
-                                <?php else: ?>
-                                    <?= number_format(floatval($r['tch'] ?? 0), 2) ?>%<br>
-                                    <span class="stacked-val"><?= number_format(floatval($r['wst'] ?? 0), 2) ?>%</span>
-                                <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-right font-mono">
-                            <?php 
-                            if ($r['fine'] != 0) {
-                                $isCr = $r['fine'] >= 0;
-                                echo "<span class='" . ($isCr ? 'text-green' : 'text-red') . "'>" . number_format(abs($r['fine']), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
-                            } else echo '0.000';
-                            ?>
-                        </td>
-                        <td class="text-right font-mono">
-                            <?php 
-                            if ($r['cash'] != 0) {
-                                $isCr = $r['cash'] >= 0;
-                                echo "<span class='" . ($isCr ? 'text-green' : 'text-red') . "'>" . number_format(abs($r['cash']), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
-                            } else echo '0';
-                            ?>
-                        </td>
-                        <td style="font-size: 10px;"><?= htmlspecialchars($r['remark']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                <tr style="font-weight: bold; background-color: #f8fafc;">
-                    <td colspan="3" class="text-center">Closing Balance:</td>
-                    <td class="text-right font-mono"><?= number_format($totGross, 3) ?></td>
-                    <td class="text-right font-mono"><?= number_format($totNet, 3) ?></td>
-                    <td></td>
-                    <td class="text-right font-mono">
-                        <?php 
-                        $isCr = $currentOutstandingGold >= 0;
-                        $colorClass = $isCr ? 'text-green' : 'text-red';
-                        echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingGold), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
-                        ?>
-                    </td>
-                    <td class="text-right font-mono">
-                        <?php 
-                        $isCr = $currentOutstandingCash >= 0;
-                        $colorClass = $isCr ? 'text-green' : 'text-red';
-                        echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingCash), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
-                        ?>
-                    </td>
-                    <td></td>
-                </tr>
-            </tbody>
-        </table>
+
+                        const file = new File([blob], fileName, { type: 'image/png' });
+
+                        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                            try {
+                                if (status) status.innerText = 'Opening WhatsApp / Share Sheet...';
+                                await navigator.share({
+                                    files: [file],
+                                    title: `Karigor Statement - ${safeName}`,
+                                    text: `Karigor Statement for <?= addslashes(htmlspecialchars($karigor['name'])) ?>`
+                                });
+                                if (status) status.innerText = '✓ Photo shared successfully!';
+                                setTimeout(() => { if (status) status.innerText = ''; }, 3000);
+                                return;
+                            } catch (e) {
+                                if (e.name === 'AbortError') {
+                                    if (status) status.innerText = '';
+                                    return;
+                                }
+                                console.warn("Share failed:", e);
+                            }
+                        }
+
+                        // Fallback for PC or browsers without file sharing
+                        let copied = false;
+                        if (navigator.clipboard && window.ClipboardItem) {
+                            try {
+                                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                                copied = true;
+                            } catch (clipErr) {}
+                        }
+
+                        downloadFallback(canvas, fileName);
+
+                        if (copied) {
+                            alert("Photo copied to clipboard & downloaded! You can paste (Ctrl+V) directly into WhatsApp.");
+                        } else {
+                            alert("Photo downloaded! You can send it directly to the Karigor.");
+                        }
+                        if (status) status.innerText = '✓ Photo downloaded!';
+                        setTimeout(() => { if (status) status.innerText = ''; }, 3500);
+                    }, 'image/png', 0.95);
+
+                } catch (err) {
+                    console.error(err);
+                    alert("Error: " + err.message);
+                    if (status) status.innerText = 'Failed to generate photo.';
+                } finally {
+                    isPhotoBusy = false;
+                    if (btn) btn.innerHTML = origBtnText;
+                    if (btnDl) btnDl.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Photo`;
+                }
+            }
+
+            function downloadFallback(canvas, fileName) {
+                const a = document.createElement('a');
+                a.download = fileName;
+                a.href = canvas.toDataURL('image/png');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+
+            window.addEventListener('DOMContentLoaded', function() {
+                const params = new URLSearchParams(window.location.search);
+                const auto = params.get('auto');
+                if (auto === 'photo') {
+                    setTimeout(function() {
+                        generateAndSharePhoto(false);
+                    }, 400);
+                } else if (auto === 'pdf') {
+                    setTimeout(function() {
+                        window.print();
+                    }, 400);
+                }
+            });
+        </script>
     </body>
     </html>
     <?php
     exit();
 }
-
 require_once 'header.php';
 ?>
 
@@ -627,19 +991,23 @@ require_once 'header.php';
     </div>
 </form>
 
-<!-- Print PDF & WhatsApp Action row -->
-<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-6 no-print">
-    <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= $from ?>&to=<?= $to ?>&print=1" target="_blank" class="w-full py-3 rounded-xl border border-[#d8a735]/40 bg-transparent text-xs font-bold text-[#d8a735] hover:bg-[#d8a735]/5 flex items-center justify-center space-x-1.5 tap-target">
-        <span class="material-symbols-rounded text-base">print</span>
+<!-- Print PDF & Photo Share Action row -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-6 no-print">
+    <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= $from ?>&to=<?= $to ?>&filter_type=<?= $filterType ?>&print=1&auto=photo" target="_blank" class="w-full py-3 px-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30 text-xs font-bold flex items-center justify-center space-x-1.5 tap-target">
+        <span class="material-symbols-rounded text-base">photo_camera</span>
+        <span>Send as Photo</span>
+    </a>
+
+    <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= $from ?>&to=<?= $to ?>&filter_type=<?= $filterType ?>&print=1&auto=pdf" target="_blank" class="w-full py-3 px-2 rounded-xl border border-[#d8a735]/40 bg-transparent text-xs font-bold text-[#d8a735] hover:bg-[#d8a735]/10 flex items-center justify-center space-x-1.5 tap-target">
+        <span class="material-symbols-rounded text-base">picture_as_pdf</span>
         <span>Download PDF</span>
     </a>
     
-    <button onclick="shareKarigorLedgerText()" class="w-full py-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/20 text-xs font-bold text-emerald-400 flex items-center justify-center space-x-1.5 tap-target">
-        <span class="material-symbols-rounded text-base">share</span>
-        <span>WhatsApp</span>
+    <button onclick="shareKarigorLedgerText()" class="w-full py-3 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 text-xs font-bold text-slate-200 flex items-center justify-center space-x-1.5 tap-target">
+        <span class="material-symbols-rounded text-base">chat</span>
+        <span>WhatsApp Text</span>
     </button>
 </div>
-
 <!-- Transactions Log -->
 <div class="mb-6" id="transactionsLog">
     <span class="text-slate-400 text-[10px] uppercase font-bold tracking-wider block mb-4">Transactions Log</span>

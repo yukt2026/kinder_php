@@ -21,23 +21,31 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $output = fopen('php://output', 'w');
         fputcsv($output, ['Date', 'Type', 'Gold Weight (g)', 'Purity (%)', 'Jama/Kaj Fine (g)', 'Cash Amount (Rs)', 'Remark']);
 
-        // Fetch Deposits
-        $depQuery = "SELECT date, 'Gold Jama' as type, fine_weight, purity, jama_fine as fine, cash_received as cash, remark FROM fine_deposits WHERE bapari_id = ? AND user_id = ?";
-        $params = [$bapariId, $userId];
-        if ($from) { $depQuery .= " AND date >= ?"; $params[] = $from; }
-        if ($to) { $depQuery .= " AND date <= ?"; $params[] = $to; }
-        $stmt = $pdo->prepare($depQuery);
-        $stmt->execute($params);
-        $deposits = $stmt->fetchAll();
+        $filterType = $_GET['filter_type'] ?? 'all';
+        $deposits = [];
+        $kajs = [];
 
-        // Fetch Kaj Entries
-        $kajQuery = "SELECT date, 'Kaarigari Job' as type, 0.0 as fine_weight, 0.0 as purity, total_kaj_fine as fine, cash_bill as cash, remark FROM kaj_entries WHERE bapari_id = ? AND user_id = ?";
-        $paramsK = [$bapariId, $userId];
-        if ($from) { $kajQuery .= " AND date >= ?"; $paramsK[] = $from; }
-        if ($to) { $kajQuery .= " AND date <= ?"; $paramsK[] = $to; }
-        $stmt = $pdo->prepare($kajQuery);
-        $stmt->execute($paramsK);
-        $kajs = $stmt->fetchAll();
+        // Fetch Deposits if all or metal
+        if ($filterType === 'all' || $filterType === 'metal') {
+            $depQuery = "SELECT date, 'Gold Jama (Metal)' as type, fine_weight, purity, jama_fine as fine, cash_received as cash, remark FROM fine_deposits WHERE bapari_id = ? AND user_id = ?";
+            $params = [$bapariId, $userId];
+            if ($from) { $depQuery .= " AND date >= ?"; $params[] = $from; }
+            if ($to) { $depQuery .= " AND date <= ?"; $params[] = $to; }
+            $stmt = $pdo->prepare($depQuery);
+            $stmt->execute($params);
+            $deposits = $stmt->fetchAll();
+        }
+
+        // Fetch Kaj Entries if all or kaam
+        if ($filterType === 'all' || $filterType === 'kaam') {
+            $kajQuery = "SELECT date, 'Kaarigari Job (Kaam)' as type, 0.0 as fine_weight, 0.0 as purity, total_kaj_fine as fine, cash_bill as cash, remark FROM kaj_entries WHERE bapari_id = ? AND user_id = ?";
+            $paramsK = [$bapariId, $userId];
+            if ($from) { $kajQuery .= " AND date >= ?"; $paramsK[] = $from; }
+            if ($to) { $kajQuery .= " AND date <= ?"; $paramsK[] = $to; }
+            $stmt = $pdo->prepare($kajQuery);
+            $stmt->execute($paramsK);
+            $kajs = $stmt->fetchAll();
+        }
 
         $entries = array_merge($deposits, $kajs);
         usort($entries, function($a, $b) { return strcmp($a['date'], $b['date']); });
@@ -68,23 +76,31 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $output = fopen('php://output', 'w');
         fputcsv($output, ['Date', 'Type', 'Gold Weight (g)', 'Purity (%)', 'Issue/Receive Fine (g)', 'Cash Amount (Rs)', 'Remark']);
 
-        // Fetch Issues
-        $issueQuery = "SELECT date, 'Material Issue (OUT)' as type, fine_weight, purity, issue_fine as fine, cash_paid as cash, remark FROM karigor_material_issues WHERE karigor_id = ? AND user_id = ?";
-        $params = [$karigorId, $userId];
-        if ($from) { $issueQuery .= " AND date >= ?"; $params[] = $from; }
-        if ($to) { $issueQuery .= " AND date <= ?"; $params[] = $to; }
-        $stmt = $pdo->prepare($issueQuery);
-        $stmt->execute($params);
-        $issues = $stmt->fetchAll();
+        $filterType = $_GET['filter_type'] ?? 'all';
+        $issues = [];
+        $receives = [];
 
-        // Fetch Receives
-        $recQuery = "SELECT date, 'Kaj Receive (IN)' as type, 0.0 as fine_weight, 0.0 as purity, total_receive_fine as fine, cash_paid as cash, remark FROM karigor_kaj_receives WHERE karigor_id = ? AND user_id = ?";
-        $paramsK = [$karigorId, $userId];
-        if ($from) { $recQuery .= " AND date >= ?"; $paramsK[] = $from; }
-        if ($to) { $recQuery .= " AND date <= ?"; $paramsK[] = $to; }
-        $stmt = $pdo->prepare($recQuery);
-        $stmt->execute($paramsK);
-        $receives = $stmt->fetchAll();
+        // Fetch Issues if all or metal
+        if ($filterType === 'all' || $filterType === 'metal') {
+            $issueQuery = "SELECT date, 'Material Issue (OUT/Metal)' as type, fine_weight, purity, issue_fine as fine, cash_paid as cash, remark FROM karigor_material_issues WHERE karigor_id = ? AND user_id = ?";
+            $params = [$karigorId, $userId];
+            if ($from) { $issueQuery .= " AND date >= ?"; $params[] = $from; }
+            if ($to) { $issueQuery .= " AND date <= ?"; $params[] = $to; }
+            $stmt = $pdo->prepare($issueQuery);
+            $stmt->execute($params);
+            $issues = $stmt->fetchAll();
+        }
+
+        // Fetch Receives if all or kaam
+        if ($filterType === 'all' || $filterType === 'kaam') {
+            $recQuery = "SELECT date, 'Kaj Receive (IN/Kaam)' as type, 0.0 as fine_weight, 0.0 as purity, total_receive_fine as fine, cash_paid as cash, remark FROM karigor_kaj_receives WHERE karigor_id = ? AND user_id = ?";
+            $paramsK = [$karigorId, $userId];
+            if ($from) { $recQuery .= " AND date >= ?"; $paramsK[] = $from; }
+            if ($to) { $recQuery .= " AND date <= ?"; $paramsK[] = $to; }
+            $stmt = $pdo->prepare($recQuery);
+            $stmt->execute($paramsK);
+            $receives = $stmt->fetchAll();
+        }
 
         $entries = array_merge($issues, $receives);
         usort($entries, function($a, $b) { return strcmp($a['date'], $b['date']); });
@@ -157,33 +173,58 @@ require_once 'header.php';
     </div>
 
 
+    <!-- Statement Filter (Input / Output: All vs Only Metal vs Only Kaam) -->
+    <div>
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
+            <span>Transaction Filter (Input / Output)</span>
+            <span id="filterLabelDetail" class="text-[#d8a735] font-semibold text-[10px]">All Transactions</span>
+        </label>
+        <div class="grid grid-cols-3 gap-2">
+            <button type="button" id="optFilterAll" onclick="setFilterType('all')" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all bg-[#d8a735] text-slate-950 shadow-md flex items-center justify-center text-center">
+                All (Sab)
+            </button>
+            <button type="button" id="optFilterMetal" onclick="setFilterType('metal')" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white flex items-center justify-center text-center">
+                Only Metal
+            </button>
+            <button type="button" id="optFilterKaam" onclick="setFilterType('kaam')" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white flex items-center justify-center text-center">
+                Only Kaam
+            </button>
+        </div>
+        <input type="hidden" name="filter_type" id="filterType" value="all">
+    </div>
+
     <!-- From and To Date Pickers Side by Side -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From</label>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From Date</label>
             <input type="date" name="from" id="fromDate" class="premium-input text-sm">
         </div>
         <div>
-            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To</label>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To Date</label>
             <input type="date" name="to" id="toDate" class="premium-input text-sm">
         </div>
     </div>
 
-    <!-- Action Buttons Row (PDF and CSV) -->
+    <!-- Action Buttons Row (View, Send Photo, PDF and CSV) -->
     <div class="space-y-3 pt-2">
         <button type="submit" class="w-full py-4 rounded-xl bg-[#d8a735] hover:bg-[#d8a735]/90 text-sm font-bold text-slate-950 flex items-center justify-center space-x-1.5 shadow-lg shadow-[#d8a735]/10 tap-target">
             <span class="material-symbols-rounded text-lg">visibility</span>
             <span>View Ledger Statement</span>
         </button>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <button type="button" onclick="generatePDF()" class="w-full py-3.5 rounded-xl border border-[#d8a735]/40 bg-transparent text-sm font-semibold text-[#d8a735] hover:bg-[#d8a735]/5 flex items-center justify-center space-x-1.5 tap-target">
-                <span class="material-symbols-rounded text-lg">description</span>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <button type="button" onclick="generatePhoto()" class="w-full py-3 px-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center space-x-1 shadow-lg shadow-emerald-900/30 tap-target">
+                <span class="material-symbols-rounded text-base">photo_camera</span>
+                <span>Send Photo</span>
+            </button>
+
+            <button type="button" onclick="generatePDF()" class="w-full py-3 px-2 rounded-xl border border-[#d8a735]/40 bg-transparent text-xs font-semibold text-[#d8a735] hover:bg-[#d8a735]/5 flex items-center justify-center space-x-1 tap-target">
+                <span class="material-symbols-rounded text-base">picture_as_pdf</span>
                 <span>PDF Print</span>
             </button>
             
-            <button type="button" onclick="generateCSV()" class="w-full py-3.5 rounded-xl border border-[#d8a735]/40 bg-transparent text-sm font-semibold text-[#d8a735] hover:bg-[#d8a735]/5 flex items-center justify-center space-x-1.5 tap-target">
-                <span class="material-symbols-rounded text-lg">grid_view</span>
+            <button type="button" onclick="generateCSV()" class="w-full py-3 px-2 rounded-xl border border-white/10 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white flex items-center justify-center space-x-1 tap-target">
+                <span class="material-symbols-rounded text-base">grid_view</span>
                 <span>CSV Export</span>
             </button>
         </div>
@@ -216,9 +257,40 @@ require_once 'header.php';
         }
     }
 
-    function generatePDF() {
+    let currentFilterType = 'all';
+
+    function setFilterType(type) {
+        currentFilterType = type;
+        document.getElementById('filterType').value = type;
+
+        const btnAll = document.getElementById('optFilterAll');
+        const btnMetal = document.getElementById('optFilterMetal');
+        const btnKaam = document.getElementById('optFilterKaam');
+        const detail = document.getElementById('filterLabelDetail');
+
+        const activeClass = "py-2.5 px-2 rounded-xl text-xs font-bold transition-all bg-[#d8a735] text-slate-950 shadow-md flex items-center justify-center text-center";
+        const inactiveClass = "py-2.5 px-2 rounded-xl text-xs font-bold transition-all bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white flex items-center justify-center text-center";
+
+        btnAll.className = inactiveClass;
+        btnMetal.className = inactiveClass;
+        btnKaam.className = inactiveClass;
+
+        if (type === 'metal') {
+            btnMetal.className = activeClass;
+            detail.innerText = currentLedgerType === 'bapari' ? 'Only Metal (Inward / Jama)' : 'Only Metal (Material Issue)';
+        } else if (type === 'kaam') {
+            btnKaam.className = activeClass;
+            detail.innerText = currentLedgerType === 'bapari' ? 'Only Kaam (Outward / Kaj)' : 'Only Kaam (Kaj Receive)';
+        } else {
+            btnAll.className = activeClass;
+            detail.innerText = 'All Transactions';
+        }
+    }
+
+    function generatePhoto() {
         const from = document.getElementById('fromDate').value;
         const to = document.getElementById('toDate').value;
+        const filterType = document.getElementById('filterType').value;
 
         if (currentLedgerType === 'bapari') {
             const bapariId = document.getElementById('bapariId').value;
@@ -226,30 +298,79 @@ require_once 'header.php';
                 alert('Please select a Bapari first!');
                 return;
             }
-            let url = `ledger.php?bapari_id=${bapariId}`;
+            let url = `ledger.php?bapari_id=${bapariId}&print=1&auto=photo`;
             if (from) url += `&from=${from}`;
             if (to) url += `&to=${to}`;
-            url += `&print=1`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
             const w = window.open(url, '_blank');
-            w.focus();
+            if (!w || w.closed || typeof w.closed === 'undefined') {
+                window.location.href = url;
+            } else {
+                try { w.focus(); } catch (e) {}
+            }
         } else {
             const karigorId = document.getElementById('karigorId').value;
             if (!karigorId) {
                 alert('Please select a Karigor first!');
                 return;
             }
-            let url = `karigor_ledger.php?karigor_id=${karigorId}`;
+            let url = `karigor_ledger.php?karigor_id=${karigorId}&print=1&auto=photo`;
             if (from) url += `&from=${from}`;
             if (to) url += `&to=${to}`;
-            url += `&print=1`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
             const w = window.open(url, '_blank');
-            w.focus();
+            if (!w || w.closed || typeof w.closed === 'undefined') {
+                window.location.href = url;
+            } else {
+                try { w.focus(); } catch (e) {}
+            }
+        }
+    }
+
+    function generatePDF() {
+        const from = document.getElementById('fromDate').value;
+        const to = document.getElementById('toDate').value;
+        const filterType = document.getElementById('filterType').value;
+
+        if (currentLedgerType === 'bapari') {
+            const bapariId = document.getElementById('bapariId').value;
+            if (!bapariId) {
+                alert('Please select a Bapari first!');
+                return;
+            }
+            let url = `ledger.php?bapari_id=${bapariId}&print=1&auto=pdf`;
+            if (from) url += `&from=${from}`;
+            if (to) url += `&to=${to}`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
+            const w = window.open(url, '_blank');
+            if (!w || w.closed || typeof w.closed === 'undefined') {
+                window.location.href = url;
+            } else {
+                try { w.focus(); } catch (e) {}
+            }
+        } else {
+            const karigorId = document.getElementById('karigorId').value;
+            if (!karigorId) {
+                alert('Please select a Karigor first!');
+                return;
+            }
+            let url = `karigor_ledger.php?karigor_id=${karigorId}&print=1&auto=pdf`;
+            if (from) url += `&from=${from}`;
+            if (to) url += `&to=${to}`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
+            const w = window.open(url, '_blank');
+            if (!w || w.closed || typeof w.closed === 'undefined') {
+                window.location.href = url;
+            } else {
+                try { w.focus(); } catch (e) {}
+            }
         }
     }
 
     function generateCSV() {
         const from = document.getElementById('fromDate').value;
         const to = document.getElementById('toDate').value;
+        const filterType = document.getElementById('filterType').value;
         
         if (currentLedgerType === 'bapari') {
             const bapariId = document.getElementById('bapariId').value;
@@ -260,6 +381,7 @@ require_once 'header.php';
             let url = `reports.php?export=csv&bapari_id=${bapariId}`;
             if (from) url += `&from=${from}`;
             if (to) url += `&to=${to}`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
             window.location.href = url;
         } else {
             const karigorId = document.getElementById('karigorId').value;
@@ -270,6 +392,7 @@ require_once 'header.php';
             let url = `reports.php?export=csv&karigor_id=${karigorId}`;
             if (from) url += `&from=${from}`;
             if (to) url += `&to=${to}`;
+            if (filterType && filterType !== 'all') url += `&filter_type=${filterType}`;
             window.location.href = url;
         }
     }

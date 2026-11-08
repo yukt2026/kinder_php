@@ -32,11 +32,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (empty($error)) {
                 $issueFine = round(($fineWeight * $purity) / 100.0, 3);
-                $stmt = $pdo->prepare("INSERT INTO karigor_material_issues (user_id, date, karigor_id, fine_weight, purity, issue_fine, cash_paid, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$userId, $date, $karigorIdInput, $fineWeight, $purity, $issueFine, $cashPaid, $remark]);
-                
-                $success = 'Material Issue added successfully!';
-                $action = 'list';
+                $confirmDuplicate = isset($_POST['confirm_duplicate']) && $_POST['confirm_duplicate'] == 1;
+                $dup = findDuplicateKarigorIssue($pdo, $userId, $karigorIdInput, $date, $fineWeight, $issueFine, $cashPaid);
+
+                if ($dup && !$confirmDuplicate) {
+                    $dupAge = time() - strtotime($dup['created_at']);
+                    if ($dupAge < 300) {
+                        $error = "Double Entry Blocked: An identical Material Issue (#ID: {$dup['id']}) of {$fineWeight}g was already saved just moments ago (" . date('H:i:s', strtotime($dup['created_at'])) . ")! Duplicate submission prevented.";
+                    } else {
+                        $error = "Duplicate Entry Detected: An identical Material Issue (#ID: {$dup['id']}) already exists for this Karigor on {$date}.<br><label class='inline-flex items-center space-x-1.5 mt-2 cursor-pointer text-amber-400 font-bold'><input type='checkbox' name='confirm_duplicate' value='1' class='rounded'> <span>Yes, save this duplicate entry anyway</span></label>";
+                    }
+                } else {
+                    $stmt = $pdo->prepare("INSERT INTO karigor_material_issues (user_id, date, karigor_id, fine_weight, purity, issue_fine, cash_paid, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->execute([$userId, $date, $karigorIdInput, $fineWeight, $purity, $issueFine, $cashPaid, $remark]);
+                    
+                    $success = 'Material Issue added successfully!';
+                    $action = 'list';
+                }
             }
         }
     } elseif (isset($_POST['edit_issue'])) {

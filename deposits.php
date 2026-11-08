@@ -33,11 +33,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (empty($error)) {
                 $jamaFine = round(($fineWeight * $purity) / 100.0, 3);
-                $stmt = $pdo->prepare("INSERT INTO fine_deposits (user_id, date, bapari_id, fine_weight, purity, jama_fine, cash_received, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$userId, $date, $bapariIdInput, $fineWeight, $purity, $jamaFine, $cashReceived, $remark]);
-                
-                $success = 'Gold Jama added successfully!';
-                $action = 'list';
+                $confirmDuplicate = isset($_POST['confirm_duplicate']) && $_POST['confirm_duplicate'] == 1;
+                $dup = findDuplicateDeposit($pdo, $userId, $bapariIdInput, $date, $fineWeight, $jamaFine, $cashReceived);
+
+                if ($dup && !$confirmDuplicate) {
+                    $dupAge = time() - strtotime($dup['created_at']);
+                    if ($dupAge < 300) {
+                        $error = "Double Entry Blocked: An identical Gold Jama (#ID: {$dup['id']}) was already saved just moments ago (" . date('H:i:s', strtotime($dup['created_at'])) . ")! Duplicate submission prevented.";
+                    } else {
+                        $error = "Duplicate Entry Detected: An identical Deposit (#ID: {$dup['id']}) of {$fineWeight}g already exists for this Bapari on {$date}.<br><label class='inline-flex items-center space-x-1.5 mt-2 cursor-pointer text-amber-400 font-bold'><input type='checkbox' name='confirm_duplicate' value='1' class='rounded'> <span>Yes, save this duplicate entry anyway</span></label>";
+                    }
+                } else {
+                    $stmt = $pdo->prepare("INSERT INTO fine_deposits (user_id, date, bapari_id, fine_weight, purity, jama_fine, cash_received, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->execute([$userId, $date, $bapariIdInput, $fineWeight, $purity, $jamaFine, $cashReceived, $remark]);
+                    
+                    $success = 'Gold Jama added successfully!';
+                    $action = 'list';
+                }
             }
         }
     } elseif (isset($_POST['edit_deposit'])) {

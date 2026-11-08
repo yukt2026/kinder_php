@@ -126,6 +126,7 @@ $toDate = $_GET['to_date'] ?? '';
 $filterMonth = $_GET['month'] ?? '';
 $filterYear = $_GET['year'] ?? '';
 $filterItem = trim($_GET['item'] ?? '');
+$searchQuery = trim($_GET['search'] ?? '');
 
 $accountTarget = $_GET['target'] ?? 'b_0';
 if (isset($_GET['bapari_id']) && intval($_GET['bapari_id']) > 0) {
@@ -160,6 +161,12 @@ if (!$isKarigorTarget) {
     if ($filterYear) { $depQuery .= " AND YEAR(date) = ?"; $depParams[] = $filterYear; }
     if ($filterMonth) { $depQuery .= " AND MONTH(date) = ?"; $depParams[] = $filterMonth; }
     if ($filterBapariId > 0) { $depQuery .= " AND bapari_id = ?"; $depParams[] = $filterBapariId; }
+    if ($searchQuery) {
+        $depQuery .= " AND (remark LIKE ? OR EXISTS (SELECT 1 FROM baparis b WHERE b.id = fine_deposits.bapari_id AND (b.name LIKE ? OR b.mobile LIKE ?)))";
+        $depParams[] = '%' . $searchQuery . '%';
+        $depParams[] = '%' . $searchQuery . '%';
+        $depParams[] = '%' . $searchQuery . '%';
+    }
 
     $stmt = $pdo->prepare($depQuery);
     $stmt->execute($depParams);
@@ -175,6 +182,13 @@ if (!$isKarigorTarget) {
     if ($filterItem) {
         $kajQuery .= " AND EXISTS (SELECT 1 FROM kaj_items ki WHERE ki.kaj_entry_id = k.id AND ki.item LIKE ?)";
         $kajParams[] = '%' . $filterItem . '%';
+    }
+    if ($searchQuery) {
+        $kajQuery .= " AND (k.remark LIKE ? OR EXISTS (SELECT 1 FROM baparis b WHERE b.id = k.bapari_id AND (b.name LIKE ? OR b.mobile LIKE ?)) OR EXISTS (SELECT 1 FROM kaj_items ki WHERE ki.kaj_entry_id = k.id AND ki.item LIKE ?))";
+        $kajParams[] = '%' . $searchQuery . '%';
+        $kajParams[] = '%' . $searchQuery . '%';
+        $kajParams[] = '%' . $searchQuery . '%';
+        $kajParams[] = '%' . $searchQuery . '%';
     }
 
     $stmt = $pdo->prepare($kajQuery);
@@ -316,6 +330,12 @@ if (!$isKarigorTarget) {
     if ($filterYear) { $issueQuery .= " AND YEAR(date) = ?"; $issueParams[] = $filterYear; }
     if ($filterMonth) { $issueQuery .= " AND MONTH(date) = ?"; $issueParams[] = $filterMonth; }
     if ($filterKarigorId > 0) { $issueQuery .= " AND karigor_id = ?"; $issueParams[] = $filterKarigorId; }
+    if ($searchQuery) {
+        $issueQuery .= " AND (remark LIKE ? OR EXISTS (SELECT 1 FROM karigors k WHERE k.id = karigor_material_issues.karigor_id AND (k.name LIKE ? OR k.mobile LIKE ?)))";
+        $issueParams[] = '%' . $searchQuery . '%';
+        $issueParams[] = '%' . $searchQuery . '%';
+        $issueParams[] = '%' . $searchQuery . '%';
+    }
 
     $stmt = $pdo->prepare($issueQuery);
     $stmt->execute($issueParams);
@@ -331,6 +351,13 @@ if (!$isKarigorTarget) {
     if ($filterItem) {
         $recQuery .= " AND EXISTS (SELECT 1 FROM karigor_kaj_receive_items kri WHERE kri.karigor_receive_id = r.id AND kri.item LIKE ?)";
         $recParams[] = '%' . $filterItem . '%';
+    }
+    if ($searchQuery) {
+        $recQuery .= " AND (r.remark LIKE ? OR EXISTS (SELECT 1 FROM karigors k WHERE k.id = r.karigor_id AND (k.name LIKE ? OR k.mobile LIKE ?)) OR EXISTS (SELECT 1 FROM karigor_kaj_receive_items kri WHERE kri.karigor_receive_id = r.id AND kri.item LIKE ?))";
+        $recParams[] = '%' . $searchQuery . '%';
+        $recParams[] = '%' . $searchQuery . '%';
+        $recParams[] = '%' . $searchQuery . '%';
+        $recParams[] = '%' . $searchQuery . '%';
     }
 
     $stmt = $pdo->prepare($recQuery);
@@ -612,7 +639,8 @@ require_once 'header.php';
     <div class="premium-card bg-[#121212]/80 space-y-4">
         <form method="GET" id="reportFilterForm" action="settings.php#reports_area">
             <div class="mb-3">
-                <select name="target" class="premium-input text-xs">
+                <label class="block text-[8px] font-bold uppercase text-slate-400 mb-1">Select Bapari / Karigor</label>
+                <select name="target" class="searchable-select premium-input text-xs" placeholder="Search Bapari or Karigor...">
                     <optgroup label="Bapari / Customers">
                         <option value="b_0" <?= $accountTarget === 'b_0' ? 'selected' : '' ?>>All Baparis (All Customers)</option>
                         <?php foreach ($filterBaparis as $b): ?>
@@ -626,6 +654,15 @@ require_once 'header.php';
                         <?php endforeach; ?>
                     </optgroup>
                 </select>
+            </div>
+
+            <!-- Search bar input -->
+            <div class="mb-3">
+                <label class="block text-[8px] font-bold uppercase text-slate-400 mb-1">Search Keywords</label>
+                <div class="relative">
+                    <span class="material-symbols-rounded absolute left-3 top-2.5 text-slate-500 text-sm">search</span>
+                    <input type="text" name="search" value="<?= htmlspecialchars($searchQuery) ?>" class="premium-input text-xs pl-8" placeholder="Search customer, mobile, item, remark...">
+                </div>
             </div>
             
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-3">
@@ -658,12 +695,15 @@ require_once 'header.php';
             </div>
             
             <div class="mb-4">
-                <input type="text" name="item" value="<?= htmlspecialchars($filterItem) ?>" class="premium-input text-xs" placeholder="Item filter">
+                <input type="text" name="item" value="<?= htmlspecialchars($filterItem) ?>" class="premium-input text-xs" placeholder="Item filter (e.g. Ring, Chain)">
             </div>
             
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <button type="submit" class="btn-gold text-xs py-3">Apply</button>
-                <a href="settings.php" class="btn-secondary text-xs py-3 flex items-center justify-center">Clear</a>
+                <button type="submit" class="btn-gold text-xs py-3 font-bold flex items-center justify-center space-x-1.5">
+                    <span class="material-symbols-rounded text-sm">search</span>
+                    <span>Search & Filter</span>
+                </button>
+                <a href="settings.php" class="btn-secondary text-xs py-3 flex items-center justify-center font-bold">Clear</a>
             </div>
         </form>
 

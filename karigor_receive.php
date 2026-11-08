@@ -47,7 +47,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($error)) {
             try {
-                $pdo->beginTransaction();
+                // Pre-calculate total receive fine to detect duplicate before insert
+                $preRecFine = 0.0;
+                foreach ($items as $it) {
+                    $gross = floatval($it['gross'] ?? 0.0);
+                    $less = floatval($it['less'] ?? 0.0);
+                    $net = max(0, round($gross - $less, 3));
+                    $milting = floatval($it['milting'] ?? 0.0);
+                    $wastage = floatval($it['wastage'] ?? 0.0);
+                    $netPart1 = floatval($it['net_part1'] ?? 0.0);
+                    $netPart2 = floatval($it['net_part2'] ?? 0.0);
+                    $wst1Raw = floatval($it['wastage1'] ?? 0.0);
+                    $wst2Raw = floatval($it['wastage2'] ?? 0.0);
+                    $extraPure = floatval($it['extra_pure'] ?? 0.0);
+                    if ($netPart1 > 0 || $netPart2 > 0) {
+                        $hisab1 = ($wst1Raw > 50) ? $wst1Raw : (($wst1Raw > 0) ? ($milting + $wst1Raw) : ($milting + $wastage));
+                        $hisab2 = ($wst2Raw > 50) ? $wst2Raw : (($wst2Raw > 0) ? ($milting + $wst2Raw) : ($milting + $wastage));
+                        $preRecFine += round(($netPart1 * ($hisab1 / 100.0)) + ($netPart2 * ($hisab2 / 100.0)) + $extraPure, 3);
+                    } else {
+                        $hisab = round($milting + $wastage, 2);
+                        $preRecFine += round((($net * $hisab) / 100.0) + $extraPure, 3);
+                    }
+                }
+                $preRecFine = round($preRecFine, 3);
+
+                // Duplicate Check
+                $confirmDuplicate = isset($_POST['confirm_duplicate']) && $_POST['confirm_duplicate'] == 1;
+                $dup = !isset($_POST['edit_receive']) ? findDuplicateKarigorReceive($pdo, $userId, $karigorIdInput, $date, $preRecFine, $cashPaid) : null;
+
+                if ($dup && !$confirmDuplicate) {
+                    $dupAge = time() - strtotime($dup['created_at']);
+                    if ($dupAge < 300) {
+                        $error = "Double Entry Blocked: An identical Kaj Receive (#ID: {$dup['id']}) was already saved just moments ago (" . date('H:i:s', strtotime($dup['created_at'])) . ")! Duplicate submission prevented.";
+                    } else {
+                        $error = "Duplicate Entry Detected: An identical Kaj Receive (#ID: {$dup['id']}) already exists for this Karigor on {$date}.<br><label class='inline-flex items-center space-x-1.5 mt-2 cursor-pointer text-amber-400 font-bold'><input type='checkbox' name='confirm_duplicate' value='1' class='rounded'> <span>Yes, save this duplicate entry anyway</span></label>";
+                    }
+                } else {
+                    $pdo->beginTransaction();
                 
                 $totalReceiveFine = 0.0;
                 $totalProfitFine = 0.0;
@@ -125,8 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit();
                 }
                 
-                $success = 'Kaj Receive entry saved successfully!';
-                $action = 'list';
+                    $success = 'Kaj Receive entry saved successfully!';
+                    $action = 'list';
+                }
 
             } catch (Exception $e) {
                 $pdo->rollBack();

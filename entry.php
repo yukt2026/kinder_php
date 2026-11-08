@@ -28,12 +28,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($bapariId <= 0 || ($fineWeight <= 0 && $cashReceived <= 0)) {
             $error = 'Please select a Bapari and enter a valid Gold weight or Cash amount!';
         } else {
-            $stmt = $pdo->prepare("
-                INSERT INTO fine_deposits (user_id, date, bapari_id, fine_weight, purity, jama_fine, cash_received, remark) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([$userId, $date, $bapariId, $fineWeight, $purity, $jamaFine, $cashReceived, $remark]);
-            $success = 'Fine Deposit added successfully!';
+            $confirmDuplicate = isset($_POST['confirm_duplicate']) && $_POST['confirm_duplicate'] == 1;
+            $dup = findDuplicateDeposit($pdo, $userId, $bapariId, $date, $fineWeight, $jamaFine, $cashReceived);
+
+            if ($dup && !$confirmDuplicate) {
+                $dupAge = time() - strtotime($dup['created_at']);
+                if ($dupAge < 300) {
+                    $error = "Double Entry Blocked: An identical Fine Deposit (#ID: {$dup['id']}) of {$fineWeight}g was already saved just moments ago (" . date('H:i:s', strtotime($dup['created_at'])) . ")! Duplicate submission prevented.";
+                } else {
+                    $error = "Duplicate Entry Detected: An identical Deposit (#ID: {$dup['id']}) of {$fineWeight}g (Cash: ₹{$cashReceived}) already exists for this Bapari on {$date}.<br><label class='inline-flex items-center space-x-1.5 mt-2 cursor-pointer text-amber-400 font-bold'><input type='checkbox' name='confirm_duplicate' value='1' class='rounded'> <span>Yes, save this duplicate entry anyway</span></label>";
+                }
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO fine_deposits (user_id, date, bapari_id, fine_weight, purity, jama_fine, cash_received, remark) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([$userId, $date, $bapariId, $fineWeight, $purity, $jamaFine, $cashReceived, $remark]);
+                $success = 'Fine Deposit added successfully!';
+            }
         }
     } elseif (isset($_POST['submit_kaj'])) {
         $date = $_POST['date'] ?? date('Y-m-d');
@@ -95,7 +107,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $remark = "Incl. Extra Pure: " . number_format($extraPureTotal, 3) . "g";
                 }
 
-                // Insert into main table
+                // Duplicate Check for Kaj Outward
+                $confirmDuplicate = isset($_POST['confirm_duplicate']) && $_POST['confirm_duplicate'] == 1;
+                $dup = findDuplicateKaj($pdo, $userId, $bapariId, $date, $totalKajFine, $cashBill);
+
+                if ($dup && !$confirmDuplicate) {
+                    $pdo->rollBack();
+                    $dupAge = time() - strtotime($dup['created_at']);
+                    if ($dupAge < 300) {
+                        $error = "Double Entry Blocked: An identical Kaarigari Job (#ID: {$dup['id']}) was already saved just moments ago (" . date('H:i:s', strtotime($dup['created_at'])) . ")! Duplicate submission prevented.";
+                    } else {
+                        $error = "Duplicate Entry Detected: An identical Kaarigari Job (#ID: {$dup['id']}) of total fine " . number_format($totalKajFine, 3) . "g already exists for this Bapari on {$date}.<br><label class='inline-flex items-center space-x-1.5 mt-2 cursor-pointer text-amber-400 font-bold'><input type='checkbox' name='confirm_duplicate' value='1' class='rounded'> <span>Yes, save this duplicate entry anyway</span></label>";
+                    }
+                } else {
+                    // Insert into main table
                 $stmt = $pdo->prepare("
                     INSERT INTO kaj_entries (user_id, date, bapari_id, total_kaj_fine, total_profit_fine, cash_bill, remark) 
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -143,9 +168,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmtItem->execute([$kajEntryId, $item, $gross, $less, $net, $milting, $wastage, $hisab, $kajFine, $profitFine, $netPart1, $netPart2, $wst1Raw, $wst2Raw, $extraPure]);
                 }
                 
-                $pdo->commit();
-                $success = 'Kaarigari Job entry recorded successfully!';
-                $activeTab = 'kaj';
+                    $pdo->commit();
+                    $success = 'Kaarigari Job entry recorded successfully!';
+                    $activeTab = 'kaj';
+                }
             } catch (Exception $e) {
                 $pdo->rollBack();
                 $error = 'Failed saving Kaj entry: ' . $e->getMessage();
