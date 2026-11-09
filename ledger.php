@@ -151,32 +151,41 @@ if (!empty($from) && $filterType === 'all') {
     $openingCash += floatval($depBefore['c'] ?? 0) - floatval($kajBefore['c'] ?? 0);
 }
 
-// 5. Fetch Deposits within Date Range
-$depQuery = "SELECT id, date, 'deposit' as type, fine_weight, purity, jama_fine, cash_received, remark, created_at FROM fine_deposits WHERE user_id = ? AND bapari_id = ?";
-$depParams = [$userId, $bapariId];
-if (!empty($from) && $filterType === 'all') { $depQuery .= " AND date >= ?"; $depParams[] = $from; }
-if (!empty($to)) { $depQuery .= " AND date <= ?"; $depParams[] = $to; }
-$stmt = $pdo->prepare($depQuery);
-$stmt->execute($depParams);
-$deposits = $stmt->fetchAll();
+// 5. Fetch Deposits within Date Range (Only if all or metal)
+$deposits = [];
+if ($filterType === 'all' || $filterType === 'metal') {
+    $depQuery = "SELECT id, date, 'deposit' as type, fine_weight, purity, jama_fine, cash_received, remark, created_at FROM fine_deposits WHERE user_id = ? AND bapari_id = ?";
+    $depParams = [$userId, $bapariId];
+    if (!empty($from)) { $depQuery .= " AND date >= ?"; $depParams[] = $from; }
+    if (!empty($to)) { $depQuery .= " AND date <= ?"; $depParams[] = $to; }
+    $stmt = $pdo->prepare($depQuery);
+    $stmt->execute($depParams);
+    $deposits = $stmt->fetchAll();
+}
 
-// 6. Fetch Kaj Entries within Date Range
-$kajQuery = "SELECT id, date, 'kaj' as type, total_kaj_fine, total_profit_fine, cash_bill, remark, created_at FROM kaj_entries WHERE user_id = ? AND bapari_id = ?";
-$kajParams = [$userId, $bapariId];
-if (!empty($from) && $filterType === 'all') { $kajQuery .= " AND date >= ?"; $kajParams[] = $from; }
-if (!empty($to)) { $kajQuery .= " AND date <= ?"; $kajParams[] = $to; }
-$stmt = $pdo->prepare($kajQuery);
-$stmt->execute($kajParams);
-$kajs = $stmt->fetchAll();
+// 6. Fetch Kaj Entries within Date Range (Only if all or kaam)
+$kajs = [];
+if ($filterType === 'all' || $filterType === 'kaam') {
+    $kajQuery = "SELECT id, date, 'kaj' as type, total_kaj_fine, total_profit_fine, cash_bill, remark, created_at FROM kaj_entries WHERE user_id = ? AND bapari_id = ?";
+    $kajParams = [$userId, $bapariId];
+    if (!empty($from)) { $kajQuery .= " AND date >= ?"; $kajParams[] = $from; }
+    if (!empty($to)) { $kajQuery .= " AND date <= ?"; $kajParams[] = $to; }
+    $stmt = $pdo->prepare($kajQuery);
+    $stmt->execute($kajParams);
+    $kajs = $stmt->fetchAll();
+}
 
-// 6b. Fetch Settlements within Date Range
-$settleQuery = "SELECT id, settlement_date as date, 'settlement' as type, closing_gold, closing_cash, created_at FROM ledger_settlements WHERE user_id = ? AND bapari_id = ?";
-$settleParams = [$userId, $bapariId];
-if (!empty($from) && $filterType === 'all') { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
-if (!empty($to)) { $settleQuery .= " AND settlement_date <= ?"; $settleParams[] = $to; }
-$stmt = $pdo->prepare($settleQuery);
-$stmt->execute($settleParams);
-$settlements = $stmt->fetchAll();
+// 6b. Fetch Settlements within Date Range (Only if full ledger)
+$settlements = [];
+if ($filterType === 'all') {
+    $settleQuery = "SELECT id, settlement_date as date, 'settlement' as type, closing_gold, closing_cash, created_at FROM ledger_settlements WHERE user_id = ? AND bapari_id = ?";
+    $settleParams = [$userId, $bapariId];
+    if (!empty($from)) { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
+    if (!empty($to)) { $settleQuery .= " AND settlement_date <= ?"; $settleParams[] = $to; }
+    $stmt = $pdo->prepare($settleQuery);
+    $stmt->execute($settleParams);
+    $settlements = $stmt->fetchAll();
+}
 
 // Merge and sort ascending by date & creation time
 $entries = array_merge($deposits, $kajs, $settlements);
@@ -393,6 +402,8 @@ $cashRunning = 0.0;
 $totGross = 0.0;
 $totLess = 0.0;
 $totNet = 0.0;
+$totFine = 0.0;
+$totCash = 0.0;
 
 foreach ($ledgerRows as &$row) {
     $fineRunning += $row['fine'];
@@ -404,6 +415,8 @@ foreach ($ledgerRows as &$row) {
         $totGross += $row['gross'];
         $totLess += $row['less'];
         $totNet += $row['net'];
+        $totFine += $row['fine'];
+        $totCash += $row['cash'];
     }
 }
 unset($row);
@@ -803,17 +816,29 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (OUTPUT / KAJ)';
                             <td></td>
                             <td class="text-right font-mono">
                                 <?php 
-                                $isCr = $currentOutstandingGold >= 0;
-                                $colorClass = $isCr ? 'text-green' : 'text-red';
-                                echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingGold), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                if ($filterType === 'all') {
+                                    $isCr = $currentOutstandingGold >= 0;
+                                    $colorClass = $isCr ? 'text-green' : 'text-red';
+                                    echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingGold), 3) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                } elseif ($filterType === 'metal') {
+                                    echo "<span class='text-green'>" . number_format($totFine, 3) . " Cr</span>";
+                                } else { // kaam
+                                    echo "<span class='text-red'>" . number_format(abs($totFine), 3) . " Db</span>";
+                                }
                                 ?>
                             </td>
                             <td class="text-right font-mono">0</td>
                             <td class="text-right font-mono">
                                 <?php 
-                                $isCr = $currentOutstandingCash >= 0;
-                                $colorClass = $isCr ? 'text-green' : 'text-red';
-                                echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingCash), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                if ($filterType === 'all') {
+                                    $isCr = $currentOutstandingCash >= 0;
+                                    $colorClass = $isCr ? 'text-green' : 'text-red';
+                                    echo "<span class='{$colorClass}'>" . number_format(abs($currentOutstandingCash), 0) . ($isCr ? ' Cr' : ' Db') . "</span>";
+                                } elseif ($filterType === 'metal') {
+                                    echo "<span class='text-green'>" . number_format($totCash, 0) . " Cr</span>";
+                                } else { // kaam
+                                    echo "<span class='text-red'>" . number_format(abs($totCash), 0) . " Db</span>";
+                                }
                                 ?>
                             </td>
                             <td></td>
@@ -1009,21 +1034,47 @@ require_once 'header.php';
     </div>
 </div>
 
-<!-- Date Filter Form (Requirement #3) -->
-<form method="GET" class="premium-card bg-[#121212]/80 p-4 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5 no-print">
+<!-- Filter Form with Transaction Mode (All / Only Metal / Only Kaam) -->
+<form method="GET" class="premium-card bg-[#121212]/80 p-4 mb-6 space-y-4 no-print">
     <input type="hidden" name="bapari_id" value="<?= $bapariId ?>">
+    
+    <!-- Mode Pills -->
     <div>
-        <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From Date</label>
-        <input type="date" name="from" value="<?= htmlspecialchars($from) ?>" class="premium-input text-xs">
+        <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Transaction Filter (Input / Output)</label>
+            <span class="text-[#d8a735] font-semibold text-[10px]"><?= $filterType === 'metal' ? 'Only Metal (Inward / Jama)' : ($filterType === 'kaam' ? 'Only Kaam (Outward / Kaj)' : 'All Transactions (Sab)') ?></span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+            <a href="ledger.php?bapari_id=<?= $bapariId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=all" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'all' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                All (Sab)
+            </a>
+            <a href="ledger.php?bapari_id=<?= $bapariId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=metal" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'metal' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                Only Metal
+            </a>
+            <a href="ledger.php?bapari_id=<?= $bapariId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=kaam" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'kaam' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                Only Kaam
+            </a>
+        </div>
+        <input type="hidden" name="filter_type" id="pageFilterType" value="<?= htmlspecialchars($filterType) ?>">
     </div>
-    <div>
-        <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To Date</label>
-        <input type="date" name="to" value="<?= htmlspecialchars($to) ?>" class="premium-input text-xs">
+
+    <!-- Date Range -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From Date</label>
+            <input type="date" name="from" value="<?= htmlspecialchars($from) ?>" class="premium-input text-xs">
+        </div>
+        <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To Date</label>
+            <input type="date" name="to" value="<?= htmlspecialchars($to) ?>" class="premium-input text-xs">
+        </div>
     </div>
-    <div class="col-span-2 flex items-center space-x-2 pt-1.5">
+
+    <!-- Submit buttons -->
+    <div class="flex items-center space-x-2 pt-1">
         <button type="submit" class="flex-1 btn-gold text-xs py-3 font-bold tracking-wider flex items-center justify-center space-x-1.5">
             <span class="material-symbols-rounded text-sm">filter_alt</span>
-            <span>Filter Ledger</span>
+            <span>Apply Date Filter</span>
         </button>
         <a href="ledger.php?bapari_id=<?= $bapariId ?>" class="px-4 py-3 rounded-xl bg-slate-900 border border-white/[0.04] text-[10px] font-bold text-slate-400 hover:text-white flex items-center justify-center">
             Reset

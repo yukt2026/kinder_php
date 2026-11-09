@@ -149,32 +149,41 @@ if (!empty($from) && $filterType === 'all') {
     $openingCash += floatval($recBefore['c'] ?? 0) - floatval($issueBefore['c'] ?? 0);
 }
 
-// 5. Fetch Material Issues within Date Range
-$issueQuery = "SELECT id, date, 'issue' as type, fine_weight, purity, issue_fine, cash_paid, remark, created_at FROM karigor_material_issues WHERE user_id = ? AND karigor_id = ?";
-$issueParams = [$userId, $karigorId];
-if (!empty($from) && $filterType === 'all') { $issueQuery .= " AND date >= ?"; $issueParams[] = $from; }
-if (!empty($to)) { $issueQuery .= " AND date <= ?"; $issueParams[] = $to; }
-$stmt = $pdo->prepare($issueQuery);
-$stmt->execute($issueParams);
-$issues = $stmt->fetchAll();
+// 5. Fetch Material Issues within Date Range (Only if all or metal)
+$issues = [];
+if ($filterType === 'all' || $filterType === 'metal') {
+    $issueQuery = "SELECT id, date, 'issue' as type, fine_weight, purity, issue_fine, cash_paid, remark, created_at FROM karigor_material_issues WHERE user_id = ? AND karigor_id = ?";
+    $issueParams = [$userId, $karigorId];
+    if (!empty($from)) { $issueQuery .= " AND date >= ?"; $issueParams[] = $from; }
+    if (!empty($to)) { $issueQuery .= " AND date <= ?"; $issueParams[] = $to; }
+    $stmt = $pdo->prepare($issueQuery);
+    $stmt->execute($issueParams);
+    $issues = $stmt->fetchAll();
+}
 
-// 6. Fetch Kaj Receives within Date Range
-$recQuery = "SELECT id, date, 'receive' as type, total_receive_fine, total_profit_less, cash_paid, remark, created_at FROM karigor_kaj_receives WHERE user_id = ? AND karigor_id = ?";
-$recParams = [$userId, $karigorId];
-if (!empty($from) && $filterType === 'all') { $recQuery .= " AND date >= ?"; $recParams[] = $from; }
-if (!empty($to)) { $recQuery .= " AND date <= ?"; $recParams[] = $to; }
-$stmt = $pdo->prepare($recQuery);
-$stmt->execute($recParams);
-$receives = $stmt->fetchAll();
+// 6. Fetch Kaj Receives within Date Range (Only if all or kaam)
+$receives = [];
+if ($filterType === 'all' || $filterType === 'kaam') {
+    $recQuery = "SELECT id, date, 'receive' as type, total_receive_fine, total_profit_less, cash_paid, remark, created_at FROM karigor_kaj_receives WHERE user_id = ? AND karigor_id = ?";
+    $recParams = [$userId, $karigorId];
+    if (!empty($from)) { $recQuery .= " AND date >= ?"; $recParams[] = $from; }
+    if (!empty($to)) { $recQuery .= " AND date <= ?"; $recParams[] = $to; }
+    $stmt = $pdo->prepare($recQuery);
+    $stmt->execute($recParams);
+    $receives = $stmt->fetchAll();
+}
 
-// 6b. Fetch Settlements within Date Range
-$settleQuery = "SELECT id, settlement_date as date, 'settlement' as type, closing_gold, closing_cash, created_at FROM karigor_ledger_settlements WHERE user_id = ? AND karigor_id = ?";
-$settleParams = [$userId, $karigorId];
-if (!empty($from) && $filterType === 'all') { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
-if (!empty($to)) { $settleQuery .= " AND settlement_date <= ?"; $settleParams[] = $to; }
-$stmt = $pdo->prepare($settleQuery);
-$stmt->execute($settleParams);
-$settlements = $stmt->fetchAll();
+// 6b. Fetch Settlements within Date Range (Only if full ledger)
+$settlements = [];
+if ($filterType === 'all') {
+    $settleQuery = "SELECT id, settlement_date as date, 'settlement' as type, closing_gold, closing_cash, created_at FROM karigor_ledger_settlements WHERE user_id = ? AND karigor_id = ?";
+    $settleParams = [$userId, $karigorId];
+    if (!empty($from)) { $settleQuery .= " AND settlement_date >= ?"; $settleParams[] = $from; }
+    if (!empty($to)) { $settleQuery .= " AND settlement_date <= ?"; $settleParams[] = $to; }
+    $stmt = $pdo->prepare($settleQuery);
+    $stmt->execute($settleParams);
+    $settlements = $stmt->fetchAll();
+}
 
 // Merge and sort ascending by date & creation time
 $entries = array_merge($issues, $receives, $settlements);
@@ -390,6 +399,8 @@ $cashRunning = 0.0;
 $totGross = 0.0;
 $totLess = 0.0;
 $totNet = 0.0;
+$totFine = 0.0;
+$totCash = 0.0;
 
 foreach ($ledgerRows as &$row) {
     $fineRunning += $row['fine'];
@@ -401,6 +412,8 @@ foreach ($ledgerRows as &$row) {
         $totGross += $row['gross'];
         $totLess += $row['less'];
         $totNet += $row['net'];
+        $totFine += $row['fine'];
+        $totCash += $row['cash'];
     }
 }
 unset($row);
@@ -969,21 +982,47 @@ require_once 'header.php';
     </div>
 </div>
 
-<!-- Date Filter Form -->
-<form method="GET" class="premium-card bg-[#121212]/80 p-4 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5 no-print">
+<!-- Filter Form with Transaction Mode (All / Only Metal / Only Kaam) -->
+<form method="GET" class="premium-card bg-[#121212]/80 p-4 mb-6 space-y-4 no-print">
     <input type="hidden" name="karigor_id" value="<?= $karigorId ?>">
+    
+    <!-- Mode Pills -->
     <div>
-        <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From Date</label>
-        <input type="date" name="from" value="<?= htmlspecialchars($from) ?>" class="premium-input text-xs">
+        <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Transaction Filter (Input / Output)</label>
+            <span class="text-[#d8a735] font-semibold text-[10px]"><?= $filterType === 'metal' ? 'Only Metal (Material Issue)' : ($filterType === 'kaam' ? 'Only Kaam (Kaj Receive)' : 'All Transactions (Sab)') ?></span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+            <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=all" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'all' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                All (Sab)
+            </a>
+            <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=metal" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'metal' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                Only Metal
+            </a>
+            <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&from=<?= urlencode($from) ?>&to=<?= urlencode($to) ?>&filter_type=kaam" class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center <?= $filterType === 'kaam' ? 'bg-[#d8a735] text-slate-950 shadow-md font-extrabold' : 'bg-slate-900 text-slate-400 border border-white/[0.04] hover:text-white' ?>">
+                Only Kaam
+            </a>
+        </div>
+        <input type="hidden" name="filter_type" id="pageFilterType" value="<?= htmlspecialchars($filterType) ?>">
     </div>
-    <div>
-        <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To Date</label>
-        <input type="date" name="to" value="<?= htmlspecialchars($to) ?>" class="premium-input text-xs">
+
+    <!-- Date Range -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">From Date</label>
+            <input type="date" name="from" value="<?= htmlspecialchars($from) ?>" class="premium-input text-xs">
+        </div>
+        <div>
+            <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">To Date</label>
+            <input type="date" name="to" value="<?= htmlspecialchars($to) ?>" class="premium-input text-xs">
+        </div>
     </div>
-    <div class="col-span-2 flex items-center space-x-2 pt-1.5">
+
+    <!-- Submit buttons -->
+    <div class="flex items-center space-x-2 pt-1">
         <button type="submit" class="flex-1 btn-gold text-xs py-3 font-bold tracking-wider flex items-center justify-center space-x-1.5">
             <span class="material-symbols-rounded text-sm">filter_alt</span>
-            <span>Filter Ledger</span>
+            <span>Apply Date Filter</span>
         </button>
         <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>" class="px-4 py-3 rounded-xl bg-slate-900 border border-white/[0.04] text-[10px] font-bold text-slate-400 hover:text-white flex items-center justify-center">
             Reset
