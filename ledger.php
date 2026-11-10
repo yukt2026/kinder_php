@@ -1162,18 +1162,6 @@ require_once 'header.php';
 <!-- Statement List (Exposing both edit and delete options) -->
 <div class="mb-6" id="transactionsLog">
     <span class="text-slate-400 text-[10px] uppercase font-bold tracking-wider block mb-4">Transactions Log</span>
-    <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            if (window.location.search.includes('from=') || window.location.search.includes('to=')) {
-                const log = document.getElementById('transactionsLog');
-                if (log) {
-                    setTimeout(() => {
-                        log.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 100);
-                }
-            }
-        });
-    </script>
     
     <div class="space-y-4">
         <?php 
