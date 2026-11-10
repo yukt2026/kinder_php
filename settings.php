@@ -53,8 +53,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_company'])) {
     
     $logoPath = $currentUser['company_logo'] ?? NULL;
     
-    // Handle Logo File Upload
-    if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] === UPLOAD_ERR_OK) {
+    // Check if client-side compressed base64 was sent
+    if (!empty($_POST['company_logo_base64']) && strpos($_POST['company_logo_base64'], 'data:image/') === 0) {
+        $logoPath = $_POST['company_logo_base64'];
+    } elseif (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] === UPLOAD_ERR_OK) {
         $fileTmpPath = $_FILES['company_logo']['tmp_name'];
         $fileName = $_FILES['company_logo']['name'];
         $fileType = $_FILES['company_logo']['type'];
@@ -552,6 +554,7 @@ require_once 'header.php';
                     <img id="logoJsPreview" class="absolute inset-0 w-full h-full object-cover hidden">
                 </div>
                 
+                <input type="hidden" name="company_logo_base64" id="companyLogoBase64">
                 <input type="file" name="company_logo" id="logoFileInput" accept="image/*" class="hidden" onchange="previewLogo(event)">
                 
                 <div class="text-[10px] text-slate-500">Upload your gold shop logo to display on statements.</div>
@@ -782,21 +785,48 @@ require_once 'header.php';
 
     function previewLogo(event) {
         if (event.target.files && event.target.files[0]) {
+            const file = event.target.files[0];
             const reader = new FileReader();
-            reader.onload = function() {
-                const preview = document.getElementById('logoJsPreview');
-                preview.src = reader.result;
-                preview.classList.remove('hidden');
-                
-                // Hide fallback elements
-                const cam = document.getElementById('logoCameraIcon');
-                const lbl = document.getElementById('logoTextLabel');
-                const img = document.getElementById('logoPreviewImage');
-                if (cam) cam.classList.add('hidden');
-                if (lbl) lbl.classList.add('hidden');
-                if (img) img.classList.add('hidden');
-            }
-            reader.readAsDataURL(event.target.files[0]);
+            reader.onload = function(e) {
+                const imgObj = new Image();
+                imgObj.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    let width = imgObj.width;
+                    let height = imgObj.height;
+                    const maxDim = 400;
+                    if (width > maxDim || height > maxDim) {
+                        if (width > height) {
+                            height = Math.round((height * maxDim) / width);
+                            width = maxDim;
+                        } else {
+                            width = Math.round((width * maxDim) / height);
+                            height = maxDim;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(imgObj, 0, 0, width, height);
+                    const compressedBase64 = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.9);
+                    
+                    const hiddenInput = document.getElementById('companyLogoBase64');
+                    if (hiddenInput) hiddenInput.value = compressedBase64;
+
+                    const preview = document.getElementById('logoJsPreview');
+                    preview.src = compressedBase64;
+                    preview.classList.remove('hidden');
+                    
+                    // Hide fallback elements
+                    const cam = document.getElementById('logoCameraIcon');
+                    const lbl = document.getElementById('logoTextLabel');
+                    const img = document.getElementById('logoPreviewImage');
+                    if (cam) cam.classList.add('hidden');
+                    if (lbl) lbl.classList.add('hidden');
+                    if (img) img.classList.add('hidden');
+                };
+                imgObj.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
         }
     }
 

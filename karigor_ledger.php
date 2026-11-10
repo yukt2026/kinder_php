@@ -205,6 +205,31 @@ foreach ($entries as &$e) {
 }
 unset($e);
 
+// Map Issue (karigor_material_issues), Receive (karigor_kaj_receives) and Settlements to sequential numbers per Karigor
+$allIssueStmt = $pdo->prepare("SELECT id FROM karigor_material_issues WHERE user_id = ? AND karigor_id = ? ORDER BY date ASC, created_at ASC, id ASC");
+$allIssueStmt->execute([$userId, $karigorId]);
+$allIssueIds = $allIssueStmt->fetchAll(PDO::FETCH_COLUMN);
+$issueSerialMap = [];
+foreach ($allIssueIds as $idx => $iId) {
+    $issueSerialMap[$iId] = $idx + 1;
+}
+
+$allRecStmt = $pdo->prepare("SELECT id FROM karigor_kaj_receives WHERE user_id = ? AND karigor_id = ? ORDER BY date ASC, created_at ASC, id ASC");
+$allRecStmt->execute([$userId, $karigorId]);
+$allRecIds = $allRecStmt->fetchAll(PDO::FETCH_COLUMN);
+$receiveSerialMap = [];
+foreach ($allRecIds as $idx => $rId) {
+    $receiveSerialMap[$rId] = $idx + 1;
+}
+
+$allSettleStmt = $pdo->prepare("SELECT id FROM karigor_ledger_settlements WHERE user_id = ? AND karigor_id = ? ORDER BY settlement_date ASC, created_at ASC, id ASC");
+$allSettleStmt->execute([$userId, $karigorId]);
+$allSettleIds = $allSettleStmt->fetchAll(PDO::FETCH_COLUMN);
+$karigorSettleSerialMap = [];
+foreach ($allSettleIds as $idx => $sId) {
+    $karigorSettleSerialMap[$sId] = $idx + 1;
+}
+
 // 7. Flat map transactions into individual Ledger rows
 $ledgerRows = [];
 $calcFineTracker = $openingGold;
@@ -243,10 +268,11 @@ foreach ($entries as $e) {
             $cashVal = $hasCash ? -floatval($e['cash_paid']) : 0.0;
             $calcFineTracker += $fineVal;
             $calcCashTracker += $cashVal;
+            $issueNum = $issueSerialMap[$e['id']] ?? $e['id'];
 
             $ledgerRows[] = [
                 'date' => $e['date'],
-                'no' => 'Issue No : ' . $e['id'],
+                'no' => 'Issue No : ' . $issueNum,
                 'name' => floatval($e['purity']) === 100.0 ? 'Fine Material' : 'Raw Gold',
                 'gross' => floatval($e['fine_weight']),
                 'less' => 0.0,
@@ -269,10 +295,11 @@ foreach ($entries as $e) {
         } elseif ($hasCash) {
             $cashVal = -floatval($e['cash_paid']);
             $calcCashTracker += $cashVal;
+            $issueNum = $issueSerialMap[$e['id']] ?? $e['id'];
 
             $ledgerRows[] = [
                 'date' => $e['date'],
-                'no' => 'Issue No : ' . $e['id'],
+                'no' => 'Issue No : ' . $issueNum,
                 'name' => 'Cash Advance',
                 'gross' => 0.0,
                 'less' => 0.0,
@@ -297,6 +324,7 @@ foreach ($entries as $e) {
         $items = $e['items'] ?? [];
         $hasItems = !empty($items);
         $cashVal = floatval($e['cash_paid']);
+        $recNum = $receiveSerialMap[$e['id']] ?? $e['id'];
 
         if ($hasItems) {
             $first = true;
@@ -308,7 +336,7 @@ foreach ($entries as $e) {
 
                 $ledgerRows[] = [
                     'date' => $e['date'],
-                    'no' => 'Receive No : ' . $e['id'],
+                    'no' => 'Receive No : ' . $recNum,
                     'name' => $it['item'],
                     'gross' => floatval($it['gross']),
                     'less' => floatval($it['less']),
@@ -336,7 +364,7 @@ foreach ($entries as $e) {
 
             $ledgerRows[] = [
                 'date' => $e['date'],
-                'no' => 'Receive No : ' . $e['id'],
+                'no' => 'Receive No : ' . $recNum,
                 'name' => 'Cash Received',
                 'gross' => 0.0,
                 'less' => 0.0,
@@ -366,10 +394,11 @@ foreach ($entries as $e) {
 
         $calcFineTracker = $targetGold;
         $calcCashTracker = $targetCash;
+        $settleNum = $karigorSettleSerialMap[$e['id']] ?? $e['id'];
 
         $ledgerRows[] = [
             'date' => $e['date'],
-            'no' => 'Settle No : ' . $e['id'],
+            'no' => 'Settle No : ' . $settleNum,
             'name' => 'Ledger Settlement',
             'gross' => 0.0,
             'less' => 0.0,
@@ -428,6 +457,28 @@ $stmt->execute([$karigorId, $userId]);
 $settlementsHistory = $stmt->fetchAll();
 
 if ($isPrintMode) {
+    // Prepare bulletproof Base64 logo for html2canvas and print view
+    $companyLogoSrc = '';
+    if (!empty($currentUser['company_logo'])) {
+        $companyLogoSrc = $currentUser['company_logo'];
+        if (strpos($companyLogoSrc, 'data:') !== 0) {
+            $cleanPath = ltrim(parse_url($companyLogoSrc, PHP_URL_PATH) ?? '', '/\\');
+            $fullPath = __DIR__ . '/' . $cleanPath;
+            if (file_exists($fullPath)) {
+                $ext = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+                $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : (($ext === 'webp') ? 'image/webp' : 'image/png');
+                $companyLogoSrc = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+            }
+        }
+    }
+    if (empty($companyLogoSrc)) {
+        if (file_exists(__DIR__ . '/assets/images/karigor-logo.jpg')) {
+            $companyLogoSrc = 'data:image/jpeg;base64,' . base64_encode(file_get_contents(__DIR__ . '/assets/images/karigor-logo.jpg'));
+        } elseif (file_exists(__DIR__ . '/assets/images/karigor-icon.png')) {
+            $companyLogoSrc = 'data:image/png;base64,' . base64_encode(file_get_contents(__DIR__ . '/assets/images/karigor-icon.png'));
+        }
+    }
+
     // Print & Photo View
     ?>
     <!DOCTYPE html>
@@ -648,8 +699,8 @@ if ($isPrintMode) {
                 <!-- Company Header Block for Printed Statements -->
                 <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 15px;">
                     <div style="display: flex; align-items: center; gap: 15px;">
-                        <?php if (!empty($currentUser['company_logo'])): ?>
-                            <img src="<?= htmlspecialchars($currentUser['company_logo']) ?>" style="max-height: 55px; max-width: 120px; object-fit: contain;">
+                        <?php if (!empty($companyLogoSrc)): ?>
+                            <img src="<?= $companyLogoSrc ?>" alt="Company Logo" style="max-height: 55px; max-width: 120px; object-fit: contain; border-radius: 4px;">
                         <?php endif; ?>
                         <div>
                             <div style="font-size: 16px; font-weight: bold; text-transform: uppercase;"><?= htmlspecialchars($currentUser['company_name'] ?: 'Dasgold') ?></div>
@@ -826,13 +877,22 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
                     const prevScrollLeft = scrollWrapper ? scrollWrapper.scrollLeft : 0;
                     if (scrollWrapper) scrollWrapper.scrollLeft = 0;
 
-                    await new Promise(r => setTimeout(r, 120));
+                    // Ensure all images are fully loaded and rendered before html2canvas runs
+                    const sheetImages = Array.from(sheet.querySelectorAll('img'));
+                    await Promise.all(sheetImages.map(img => {
+                        if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
+                        return new Promise(resolve => {
+                            img.onload = img.onerror = resolve;
+                        });
+                    }));
+
+                    await new Promise(r => setTimeout(r, 150));
 
                     const canvas = await html2canvas(sheet, {
                         scale: 2,
                         backgroundColor: '#ffffff',
                         useCORS: true,
-                        allowTaint: true,
+                        allowTaint: false,
                         logging: false,
                         scrollX: 0,
                         scrollY: 0,
@@ -1082,6 +1142,9 @@ require_once 'header.php';
                     <div class="flex items-start justify-between border-b border-white/[0.04] pb-2.5 mb-2.5">
                         <div>
                             <span class="text-[9px] text-slate-500 font-mono"><?= date('d/m/Y', strtotime($row['date'])) ?></span>
+                            <?php if (!empty($row['no'])): ?>
+                                <span class="text-[9px] text-[#d8a735] font-mono ml-1.5 font-bold">• <?= htmlspecialchars($row['no']) ?></span>
+                            <?php endif; ?>
                             <div class="mt-0.5">
                                 <?php if ($row['is_settlement']): ?>
                                     <span class="bg-[#d8a735]/10 text-[#d8a735] px-2 py-0.5 rounded-lg border border-[#d8a735]/20 text-[8px] font-bold uppercase tracking-wider">Ledger Settlement</span>
@@ -1119,7 +1182,7 @@ require_once 'header.php';
                         <span class="font-sans font-bold text-slate-500 block mb-0.5">Details (<?= htmlspecialchars($row['name']) ?>):</span>
                         <?php if ($row['name'] !== 'Cash Advance' && $row['name'] !== 'Cash Received'): ?>
                             Gross: <?= number_format($row['gross'], 3) ?>g | Less: <?= number_format($row['less'], 3) ?>g<br>
-                            Purity: <?= number_format($row['tch'], 1) ?>% | Wastage: <?= number_format($row['wst'], 1) ?>%
+                            Purity: <?= number_format($row['tch'], 2) ?>% | Wastage: <?= number_format($row['wst'], 2) ?>%
                             <?php 
                             $splitNotes = [];
                             if (!empty($row['net_part1']) && floatval($row['net_part1']) > 0) {
@@ -1142,8 +1205,30 @@ require_once 'header.php';
                             <div class="mt-1 text-slate-500 font-sans">Narration: <?= htmlspecialchars($row['remark']) ?></div>
                         <?php endif; ?>
                     </div>
-                    <?php if (!$isReadOnly): ?>
-                        <div class="flex items-center justify-end space-x-2.5 mt-3 pt-2.5 border-t border-white/[0.03] no-print">
+                    <?php
+                    $txShareData = [
+                        'date' => date('d/m/Y', strtotime($row['date'])),
+                        'no' => $row['no'] ?? '',
+                        'typeName' => $row['is_settlement'] ? 'Ledger Settlement' : ($isIssue ? 'Material Issue (OUT)' : 'Kaj Receive (IN)'),
+                        'name' => $row['name'],
+                        'gross' => number_format($row['gross'], 3),
+                        'less' => number_format($row['less'], 3),
+                        'net' => number_format($row['net'], 3),
+                        'tch' => number_format($row['tch'], 2),
+                        'wst' => number_format($row['wst'], 2),
+                        'fine' => ($row['fine'] >= 0 ? '+' : '-') . number_format(abs($row['fine']), 3),
+                        'cash' => $row['cash'] != 0 ? (($row['cash'] >= 0 ? '+' : '-') . '₹' . number_format(abs($row['cash']), 0)) : '--',
+                        'remark' => $row['remark'] ?? '',
+                        'runningGold' => number_format($row['running_fine'], 3) . ' g',
+                        'runningCash' => '₹' . number_format($row['running_cash'], 2),
+                        'splitNotes' => $splitNotes ?? []
+                    ];
+                    ?>
+                    <div class="flex items-center justify-end space-x-2.5 mt-3 pt-2.5 border-t border-white/[0.03] no-print">
+                        <button type="button" onclick='shareSingleTx(<?= json_encode($txShareData, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)' class="w-8 h-8 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 flex items-center justify-center transition-colors tap-target" title="Share Voucher on WhatsApp">
+                            <span class="material-symbols-rounded text-base">share</span>
+                        </button>
+                        <?php if (!$isReadOnly): ?>
                             <?php if ($row['is_settlement']): ?>
                                 <a href="karigor_ledger.php?karigor_id=<?= $karigorId ?>&edit_settlement=<?= $row['id'] ?>" class="w-8 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/[0.05] flex items-center justify-center text-slate-400 transition-colors tap-target" title="Edit Settlement">
                                     <span class="material-symbols-rounded text-base">edit</span>
@@ -1297,6 +1382,58 @@ require_once 'header.php';
 </div>
 
 <script>
+    function shareSingleTx(tx) {
+        const company = <?= json_encode($currentUser['company_name'] ?: 'Dasgold') ?>;
+        const party = <?= json_encode($karigor['name'] ?? '') ?>;
+        
+        let text = `*${company}*\n`;
+        text += `*Transaction Voucher*\n`;
+        text += `--------------------------------\n`;
+        text += `*Karigor:* ${party}\n`;
+        text += `*Date:* ${tx.date}\n`;
+        if (tx.no) {
+            text += `*Voucher:* ${tx.no}\n`;
+        }
+        text += `*Type:* ${tx.typeName}\n`;
+        text += `--------------------------------\n`;
+        
+        if (tx.name && tx.name !== 'Cash Advance' && tx.name !== 'Cash Received') {
+            text += `*Item:* ${tx.name}\n`;
+            text += `*Gross:* ${tx.gross} g | *Less:* ${tx.less} g\n`;
+            text += `*Net:* ${tx.net} g\n`;
+            text += `*Purity:* ${tx.tch}% | *Wastage:* ${tx.wst}%\n`;
+            if (tx.splitNotes && tx.splitNotes.length > 0) {
+                text += `*Split:* ${tx.splitNotes.join(' | ')}\n`;
+            }
+        }
+        
+        text += `*Gold Fine:* ${tx.fine} g\n`;
+        if (tx.cash && tx.cash !== '--') {
+            text += `*Cash:* ${tx.cash}\n`;
+        }
+        if (tx.remark) {
+            text += `*Narration:* ${tx.remark}\n`;
+        }
+        
+        text += `--------------------------------\n`;
+        text += `*Running Balance:*\n`;
+        text += `*Gold:* ${tx.runningGold}\n`;
+        text += `*Cash:* ${tx.runningCash}\n`;
+
+        if (navigator.share) {
+            navigator.share({
+                title: `${company} - ${tx.no || 'Voucher'}`,
+                text: text
+            }).catch(err => {
+                if (err.name !== 'AbortError') {
+                    window.open("https://api.whatsapp.com/send?text=" + encodeURIComponent(text), "_blank");
+                }
+            });
+        } else {
+            window.open("https://api.whatsapp.com/send?text=" + encodeURIComponent(text), "_blank");
+        }
+    }
+
     function shareKarigorLedgerText() {
         let text = "*Dasgold Karigor Ledger Statement*\n";
         text += "*Karigor:* <?= htmlspecialchars($karigor['name']) ?>\n";
