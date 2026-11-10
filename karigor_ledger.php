@@ -460,22 +460,44 @@ if ($isPrintMode) {
     // Prepare bulletproof Base64 logo for html2canvas and print view
     $companyLogoSrc = '';
     if (!empty($currentUser['company_logo'])) {
-        $companyLogoSrc = $currentUser['company_logo'];
-        if (strpos($companyLogoSrc, 'data:') !== 0) {
-            $cleanPath = ltrim(parse_url($companyLogoSrc, PHP_URL_PATH) ?? '', '/\\');
-            $fullPath = __DIR__ . '/' . $cleanPath;
-            if (file_exists($fullPath)) {
-                $ext = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
-                $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : (($ext === 'webp') ? 'image/webp' : 'image/png');
-                $companyLogoSrc = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+        $rawLogo = trim($currentUser['company_logo']);
+        if (strpos($rawLogo, 'data:image/') === 0) {
+            $companyLogoSrc = $rawLogo;
+        } else {
+            $cleanPath = ltrim(parse_url($rawLogo, PHP_URL_PATH) ?? '', '/\\');
+            $cleanPath = preg_replace('#^kinder_php/#i', '', $cleanPath);
+            $potentialPaths = [
+                __DIR__ . '/' . $cleanPath,
+                __DIR__ . '/assets/' . $cleanPath,
+                __DIR__ . '/assets/uploads/' . basename($cleanPath),
+                __DIR__ . '/uploads/' . basename($cleanPath),
+            ];
+            foreach ($potentialPaths as $p) {
+                if (file_exists($p) && is_file($p)) {
+                    $ext = strtolower(pathinfo($p, PATHINFO_EXTENSION));
+                    $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : (($ext === 'webp') ? 'image/webp' : 'image/png');
+                    $companyLogoSrc = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($p));
+                    break;
+                }
             }
         }
     }
+    
+    // Fallback to default brand logo if custom logo is missing or not readable
     if (empty($companyLogoSrc)) {
-        if (file_exists(__DIR__ . '/assets/images/karigor-logo.jpg')) {
-            $companyLogoSrc = 'data:image/jpeg;base64,' . base64_encode(file_get_contents(__DIR__ . '/assets/images/karigor-logo.jpg'));
-        } elseif (file_exists(__DIR__ . '/assets/images/karigor-icon.png')) {
-            $companyLogoSrc = 'data:image/png;base64,' . base64_encode(file_get_contents(__DIR__ . '/assets/images/karigor-icon.png'));
+        $defaultFiles = [
+            __DIR__ . '/assets/images/karigor-icon.png',
+            __DIR__ . '/assets/images/karigor-logo.jpg',
+            __DIR__ . '/assets/images/icon.png',
+            __DIR__ . '/assets/images/app-image.png'
+        ];
+        foreach ($defaultFiles as $df) {
+            if (file_exists($df) && is_file($df)) {
+                $ext = strtolower(pathinfo($df, PATHINFO_EXTENSION));
+                $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : (($ext === 'webp') ? 'image/webp' : 'image/png');
+                $companyLogoSrc = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($df));
+                break;
+            }
         }
     }
 
@@ -698,9 +720,9 @@ if ($isPrintMode) {
             <div id="statementContent" class="paper-sheet">
                 <!-- Company Header Block for Printed Statements -->
                 <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
+                    <div style="display: flex; align-items: center;">
                         <?php if (!empty($companyLogoSrc)): ?>
-                            <img src="<?= $companyLogoSrc ?>" alt="Company Logo" style="max-height: 55px; max-width: 120px; object-fit: contain; border-radius: 4px;">
+                            <img src="<?= $companyLogoSrc ?>" alt="Company Logo" width="55" height="55" style="width: 55px; height: 55px; max-height: 55px; max-width: 55px; object-fit: contain; border-radius: 6px; margin-right: 14px; display: inline-block; flex-shrink: 0;">
                         <?php endif; ?>
                         <div>
                             <div style="font-size: 16px; font-weight: bold; text-transform: uppercase;"><?= htmlspecialchars($currentUser['company_name'] ?: 'Dasgold') ?></div>
@@ -985,7 +1007,7 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
                 if (auto === 'photo') {
                     setTimeout(function() {
                         generateAndSharePhoto(false);
-                    }, 400);
+                    }, 600);
                 } else if (auto === 'pdf') {
                     setTimeout(function() {
                         window.print();
