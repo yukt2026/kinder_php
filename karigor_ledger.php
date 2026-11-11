@@ -461,7 +461,7 @@ if ($isPrintMode) {
     $companyLogoSrc = '';
     if (!empty($currentUser['company_logo'])) {
         $rawLogo = trim($currentUser['company_logo']);
-        if (strpos($rawLogo, 'data:image/') === 0) {
+        if (strpos($rawLogo, 'data:') === 0) {
             $companyLogoSrc = $rawLogo;
         } else {
             $cleanPath = ltrim(parse_url($rawLogo, PHP_URL_PATH) ?? '', '/\\');
@@ -480,14 +480,17 @@ if ($isPrintMode) {
                     break;
                 }
             }
+            if (empty($companyLogoSrc) && filter_var($rawLogo, FILTER_VALIDATE_URL)) {
+                $companyLogoSrc = $rawLogo;
+            }
         }
     }
     
     // Fallback to default brand logo if custom logo is missing or not readable
     if (empty($companyLogoSrc)) {
         $defaultFiles = [
-            __DIR__ . '/assets/images/karigor-icon.png',
             __DIR__ . '/assets/images/karigor-logo.jpg',
+            __DIR__ . '/assets/images/karigor-icon.png',
             __DIR__ . '/assets/images/icon.png',
             __DIR__ . '/assets/images/app-image.png'
         ];
@@ -674,6 +677,11 @@ if ($isPrintMode) {
                     size: auto;
                     margin: 10mm;
                 }
+                #statementLogoCanvas {
+                    display: inline-block !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
             }
         </style>
         <script src="assets/js/html2canvas.min.js"></script>
@@ -722,7 +730,10 @@ if ($isPrintMode) {
                 <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 15px;">
                     <div style="display: flex; align-items: center;">
                         <?php if (!empty($companyLogoSrc)): ?>
-                            <img src="<?= $companyLogoSrc ?>" alt="Company Logo" width="55" height="55" style="width: 55px; height: 55px; max-height: 55px; max-width: 55px; object-fit: contain; border-radius: 6px; margin-right: 14px; display: inline-block; flex-shrink: 0;">
+                            <div style="width: 55px; height: 55px; margin-right: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; position: relative;">
+                                <canvas id="statementLogoCanvas" width="110" height="110" style="width: 55px; height: 55px; max-height: 55px; max-width: 55px; border-radius: 6px; display: block;"></canvas>
+                                <img id="statementLogoImg" src="<?= $companyLogoSrc ?>" alt="Company Logo" style="display: none;" crossorigin="anonymous">
+                            </div>
                         <?php endif; ?>
                         <div>
                             <div style="font-size: 16px; font-weight: bold; text-transform: uppercase;"><?= htmlspecialchars($currentUser['company_name'] ?: 'Dasgold') ?></div>
@@ -878,6 +889,54 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
         </div>
 
         <script>
+            function drawStatementLogo() {
+                const canvas = document.getElementById('statementLogoCanvas');
+                const img = document.getElementById('statementLogoImg');
+                if (!canvas || !img) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                const render = () => {
+                    const iw = img.naturalWidth || img.width;
+                    const ih = img.naturalHeight || img.height;
+                    if (!iw || !ih) return;
+
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Smooth rounded corner clip
+                    const r = 12;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(r, 0);
+                    ctx.lineTo(canvas.width - r, 0);
+                    ctx.quadraticCurveTo(canvas.width, 0, canvas.width, r);
+                    ctx.lineTo(canvas.width, canvas.height - r);
+                    ctx.quadraticCurveTo(canvas.width, canvas.height, canvas.width - r, canvas.height);
+                    ctx.lineTo(r, canvas.height);
+                    ctx.quadraticCurveTo(0, canvas.height, 0, canvas.height - r);
+                    ctx.lineTo(0, r);
+                    ctx.quadraticCurveTo(0, 0, r, 0);
+                    ctx.closePath();
+                    ctx.clip();
+
+                    // Object-fit: contain calculation
+                    const scale = Math.min(canvas.width / iw, canvas.height / ih);
+                    const dw = iw * scale;
+                    const dh = ih * scale;
+                    const dx = (canvas.width - dw) / 2;
+                    const dy = (canvas.height - dh) / 2;
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                    ctx.restore();
+                };
+
+                if (img.complete && (img.naturalWidth || img.width) > 0) {
+                    render();
+                } else {
+                    img.onload = render;
+                }
+            }
+            drawStatementLogo();
+
             let isPhotoBusy = false;
             async function generateAndSharePhoto(isDownloadOnly) {
                 if (isPhotoBusy) return;
@@ -895,12 +954,23 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
                     const sheet = document.getElementById('statementContent');
                     if (!sheet) throw new Error("Statement content not found");
 
+                    // Ensure statement logo is drawn on live canvas
+                    const logoImg = document.getElementById('statementLogoImg');
+                    if (logoImg && (!logoImg.complete || !(logoImg.naturalWidth || logoImg.width))) {
+                        await new Promise(resolve => {
+                            logoImg.onload = resolve;
+                            logoImg.onerror = resolve;
+                            setTimeout(resolve, 500);
+                        });
+                    }
+                    drawStatementLogo();
+
                     const scrollWrapper = sheet.closest('.scroll-wrapper');
                     const prevScrollLeft = scrollWrapper ? scrollWrapper.scrollLeft : 0;
                     if (scrollWrapper) scrollWrapper.scrollLeft = 0;
 
-                    // Ensure all images are fully loaded and rendered before html2canvas runs
-                    const sheetImages = Array.from(sheet.querySelectorAll('img'));
+                    // Ensure all other visible images are fully loaded and rendered before html2canvas runs
+                    const sheetImages = Array.from(sheet.querySelectorAll('img')).filter(i => i.style.display !== 'none');
                     await Promise.all(sheetImages.map(img => {
                         if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
                         return new Promise(resolve => {
@@ -908,17 +978,27 @@ if ($filterType === 'kaam') $stmtTitle = 'STATEMENT - ONLY KAAM (KAJ RECEIVE)';
                         });
                     }));
 
-                    await new Promise(r => setTimeout(r, 150));
+                    await new Promise(r => setTimeout(r, 100));
 
                     const canvas = await html2canvas(sheet, {
                         scale: 2,
                         backgroundColor: '#ffffff',
                         useCORS: true,
-                        allowTaint: false,
+                        allowTaint: true,
                         logging: false,
                         scrollX: 0,
                         scrollY: 0,
-                        windowWidth: 860
+                        windowWidth: 860,
+                        onclone: function(clonedDoc) {
+                            const origCanvas = document.getElementById('statementLogoCanvas');
+                            const clonedCanvas = clonedDoc.getElementById('statementLogoCanvas');
+                            if (origCanvas && clonedCanvas) {
+                                const ctx = clonedCanvas.getContext('2d');
+                                if (ctx) {
+                                    ctx.drawImage(origCanvas, 0, 0);
+                                }
+                            }
+                        }
                     });
 
                     const safeName = <?= json_encode(preg_replace('/[^a-zA-Z0-9_-]/', '_', $karigor['name'] ?: 'karigor')) ?>;
