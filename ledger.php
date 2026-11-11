@@ -65,7 +65,7 @@ if (isset($_GET['delete_deposit'])) {
     
     $stmt = $pdo->prepare("DELETE FROM fine_deposits WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $userId]);
-    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : "") . "#transactionsLog");
+    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : ""));
     exit();
 }
 
@@ -83,7 +83,7 @@ if (isset($_GET['delete_kaj'])) {
     
     $stmt = $pdo->prepare("DELETE FROM kaj_entries WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $userId]);
-    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : "") . "#transactionsLog");
+    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : ""));
     exit();
 }
 
@@ -93,7 +93,7 @@ if (isset($_GET['delete_settlement'])) {
     $id = intval($_GET['delete_settlement']);
     $stmt = $pdo->prepare("DELETE FROM ledger_settlements WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $userId]);
-    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : "") . "#transactionsLog");
+    header("Location: ledger.php?bapari_id=" . $bapariId . ($from ? "&from=".$from : "") . ($to ? "&to=".$to : ""));
     exit();
 }
 
@@ -1546,7 +1546,7 @@ require_once 'header.php';
         document.addEventListener('DOMContentLoaded', () => {
             updateTypeButtons();
             
-            // Auto-scroll to form if editing
+            // Auto-scroll to form ONLY if editing settlement
             if (window.location.search.includes('edit_settlement=')) {
                 const section = document.getElementById('settlementSection');
                 if (section) {
@@ -1554,6 +1554,12 @@ require_once 'header.php';
                         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }, 100);
                 }
+            } else if (!window.location.hash) {
+                // Ensure page always opens at the very top so Outstanding Balance is immediately visible
+                if ('scrollRestoration' in history) {
+                    history.scrollRestoration = 'manual';
+                }
+                window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
             }
         });
     </script>
