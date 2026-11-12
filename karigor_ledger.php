@@ -457,13 +457,14 @@ $stmt->execute([$karigorId, $userId]);
 $settlementsHistory = $stmt->fetchAll();
 
 if ($isPrintMode) {
-    // Prepare bulletproof Base64 logo for html2canvas and print view
+    // Prepare company logo: ONLY use the logo set in Settings ($currentUser['company_logo'])
     $companyLogoSrc = '';
     if (!empty($currentUser['company_logo'])) {
         $rawLogo = trim($currentUser['company_logo']);
         if (strpos($rawLogo, 'data:') === 0) {
             $companyLogoSrc = $rawLogo;
         } else {
+            // Try to resolve file on server and base64-encode for instant canvas capture
             $cleanPath = ltrim(parse_url($rawLogo, PHP_URL_PATH) ?? '', '/\\');
             $cleanPath = preg_replace('#^kinder_php/#i', '', $cleanPath);
             $potentialPaths = [
@@ -480,26 +481,9 @@ if ($isPrintMode) {
                     break;
                 }
             }
-            if (empty($companyLogoSrc) && filter_var($rawLogo, FILTER_VALIDATE_URL)) {
+            // If not found as a local file, use the exact logo path set in Settings
+            if (empty($companyLogoSrc)) {
                 $companyLogoSrc = $rawLogo;
-            }
-        }
-    }
-    
-    // Fallback to default brand logo if custom logo is missing or not readable
-    if (empty($companyLogoSrc)) {
-        $defaultFiles = [
-            __DIR__ . '/assets/images/karigor-logo.jpg',
-            __DIR__ . '/assets/images/karigor-icon.png',
-            __DIR__ . '/assets/images/icon.png',
-            __DIR__ . '/assets/images/app-image.png'
-        ];
-        foreach ($defaultFiles as $df) {
-            if (file_exists($df) && is_file($df)) {
-                $ext = strtolower(pathinfo($df, PATHINFO_EXTENSION));
-                $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : (($ext === 'webp') ? 'image/webp' : 'image/png');
-                $companyLogoSrc = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($df));
-                break;
             }
         }
     }
@@ -732,7 +716,7 @@ if ($isPrintMode) {
                         <?php if (!empty($companyLogoSrc)): ?>
                             <div style="width: 55px; height: 55px; margin-right: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; position: relative;">
                                 <canvas id="statementLogoCanvas" width="110" height="110" style="width: 55px; height: 55px; max-height: 55px; max-width: 55px; border-radius: 6px; display: block;"></canvas>
-                                <img id="statementLogoImg" src="<?= $companyLogoSrc ?>" alt="Company Logo" style="display: none;" crossorigin="anonymous">
+                                <img id="statementLogoImg" src="<?= $companyLogoSrc ?>" alt="Company Logo" style="display: none;">
                             </div>
                         <?php endif; ?>
                         <div>
